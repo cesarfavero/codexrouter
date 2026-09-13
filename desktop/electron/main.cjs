@@ -395,7 +395,10 @@ function showWindow() {
 }
 
 function trayImage() {
-  const image = nativeImage.createFromDataURL(`data:image/png;base64,${TRAY_ICON}`);
+  const brandedIcon = path.join(__dirname, '..', '..', 'assets', 'codexrouter-icon.png');
+  const image = fs.existsSync(brandedIcon)
+    ? nativeImage.createFromPath(brandedIcon)
+    : nativeImage.createFromDataURL(`data:image/png;base64,${TRAY_ICON}`);
   if (process.platform === 'darwin') image.setTemplateImage(true);
   return image.resize({ width: 16, height: 16 });
 }
