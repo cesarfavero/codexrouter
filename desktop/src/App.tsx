@@ -17,6 +17,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [login, setLogin] = useState<{ accountId?: string; state?: string; url?: string } | null>(null);
+  const [update, setUpdate] = useState<{ version: string; url: string } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!api) return;
@@ -35,6 +36,7 @@ export function App() {
       if (event.type === 'log') setLogs(current => [...current.slice(-249), event.record]);
       if (event.type === 'login-state') setLogin(current => ({ ...current, accountId: event.accountId, state: event.state }));
       if (event.type === 'login-url') setLogin(current => ({ ...current, accountId: event.accountId, url: event.url }));
+      if (event.type === 'update-available') setUpdate({ version: event.version, url: event.url });
     });
   }, [refresh]);
 
@@ -89,6 +91,7 @@ export function App() {
         </header>
 
         <div className="content-scroll">
+          {update ? <div className="update-banner"><span>CodexRouter {update.version} is available.</span><button onClick={() => void api.openExternal(update.url)} type="button">View release</button><button aria-label="Dismiss update" onClick={() => setUpdate(null)} type="button">×</button></div> : null}
           <AnimatePresence mode="wait">
             <motion.section animate={{ opacity: 1, y: 0 }} className="surface" exit={{ opacity: 0, y: -5 }} initial={{ opacity: 0, y: 7 }} key={surface} transition={transition}>
               {surface === 'accounts' ? <AccountsSurface snapshot={snapshot} onAdd={() => setAddOpen(true)} onRefresh={refresh} setError={setError} setLogin={setLogin} /> : null}
@@ -288,7 +291,7 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
     <>
       <SurfaceHeader eyebrow="Settings" title="Models and desktop behavior" body="Choose the native Codex model and default reasoning effort used by the active gateway account." />
       <div className="settings-list">
-        <SettingRow title="Default native model" description={active ? `Model used behind CodexRouter for ${active.label}. Refresh the gateway catalog to discover new models.` : 'Connect an account first.'}>
+        <SettingRow title="Default native model" description={active ? 'Model used behind CodexRouter for the active account. Refresh the gateway catalog to discover new models.' : 'Connect an account first.'}>
           <select aria-label="Default native model" disabled={!active || !availableModels.length || saving} onChange={event => setModel(event.target.value)} value={model}>
             {!availableModels.length ? <option value="">Refresh catalog first</option> : null}
             {availableModels.map(item => <option key={item.slug} value={item.slug}>{item.name} · {item.slug}</option>)}

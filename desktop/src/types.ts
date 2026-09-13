@@ -73,6 +73,7 @@ export type Snapshot = {
 };
 
 export type LauncherEvent =
+  | { type: 'update-available'; version: string; url: string }
   | { type: 'snapshot-invalidated' }
   | { type: 'open-add-account' }
   | { type: 'login-url'; accountId: string; url: string }

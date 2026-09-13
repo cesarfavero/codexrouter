@@ -1,6 +1,6 @@
 {
   "name": "codexrouter",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Desktop-first single-model gateway for Codex with isolated ChatGPT accounts and usage telemetry.",
   "type": "module",
   "main": "desktop/electron/main.cjs",
@@ -17,6 +17,7 @@
     "desktop:build": "vite build --config desktop/vite.config.ts",
     "desktop:package": "npm run desktop:typecheck && npm run desktop:build && electron-builder --mac",
     "desktop:package:all": "npm run desktop:typecheck && npm run desktop:build && electron-builder -mwl",
+    "desktop:package:mac": "npm run desktop:typecheck && npm run desktop:build && electron-builder --mac",
     "e2e:mac": "node scripts/e2e-macos.mjs"
   },
   "dependencies": {
@@ -60,6 +61,7 @@
       "THIRD_PARTY_NOTICES.md"
     ],
     "mac": {
+      "icon": "assets/CodexRouter.icns",
       "category": "public.app-category.developer-tools",
       "minimumSystemVersion": "13.0",
       "hardenedRuntime": true,

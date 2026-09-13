@@ -34,6 +34,13 @@ export function listVisibleNativeModels(catalog) {
   );
 }
 
+export function summarizeNativeModels(catalog) {
+  return listVisibleNativeModels(catalog).map(model => ({
+    slug: model.slug,
+    name: model.display_name ?? model.name ?? model.slug,
+  }));
+}
+
 export function chooseNativeModel(catalog, preferredModel = null) {
   const models = listVisibleNativeModels(catalog);
   if (!models.length) return null;
@@ -64,10 +71,14 @@ export function buildGatewayCatalog(accountCatalogs, activeAccountId) {
 export function syncCatalog(registry) {
   if (!registry.accounts.length) throw new Error('No accounts configured.');
 
-  const accountCatalogs = registry.accounts.map(account => ({
-    account,
-    catalog: fetchNativeCatalog(account.codexHome),
-  }));
+  const accountCatalogs = registry.accounts.flatMap(account => {
+    try {
+      return [{ account, catalog: fetchNativeCatalog(account.codexHome) }];
+    } catch {
+      return [];
+    }
+  });
+  if (!accountCatalogs.length) throw new Error('No connected account returned a usable Codex model catalog.');
 
   let registryChanged = false;
   for (const { account, catalog } of accountCatalogs) {
@@ -78,7 +89,7 @@ export function syncCatalog(registry) {
       account.nativeModelCount = visible.length;
       registryChanged = true;
     }
-    const availableModels = visible.map(model => ({ slug: model.slug, name: model.display_name ?? model.name ?? model.slug }));
+    const availableModels = summarizeNativeModels(catalog);
     if (JSON.stringify(account.availableModels ?? []) !== JSON.stringify(availableModels)) {
       account.availableModels = availableModels;
       registryChanged = true;

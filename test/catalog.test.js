@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GATEWAY_SLUG, buildGatewayCatalog, chooseNativeModel } from '../src/catalog.js';
+import { GATEWAY_SLUG, buildGatewayCatalog, chooseNativeModel, summarizeNativeModels } from '../src/catalog.js';
 
 test('gateway catalog exposes exactly one CodexRouter model', () => {
   const cesar = {
@@ -33,4 +33,13 @@ test('native model selection respects preference then catalog default', () => {
   };
   assert.equal(chooseNativeModel(source, 'gpt-preferred'), 'gpt-preferred');
   assert.equal(chooseNativeModel(source, 'missing'), 'gpt-default');
+});
+
+test('summarizes only selectable native models', () => {
+  const result = summarizeNativeModels({ models: [
+    { slug: 'gpt-5.6-sol', display_name: 'GPT-5.6 Sol', visibility: 'list' },
+    { slug: 'hidden', visibility: 'hide' },
+    { slug: 'codexrouter/gateway', visibility: 'list' },
+  ] });
+  assert.deepEqual(result, [{ slug: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' }]);
 });

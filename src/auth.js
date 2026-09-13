@@ -140,6 +140,15 @@ export function fetchNativeCatalog(codexHome) {
   return JSON.parse(output.slice(start));
 }
 
+export function readCachedNativeCatalog(codexHome) {
+  try {
+    const cached = readJson(path.join(codexHome, 'models_cache.json'));
+    return cached && Array.isArray(cached.models) ? cached : null;
+  } catch {
+    return null;
+  }
+}
+
 export function inspectAuth(codexHome) {
   const authPath = path.join(codexHome, 'auth.json');
   const auth = readJson(authPath);

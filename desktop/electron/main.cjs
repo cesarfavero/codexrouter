@@ -9,6 +9,7 @@ const { getAutostart, setAutostart } = require('./autostart.cjs');
 const DEFAULT_PORT = Number(process.env.CODEXROUTER_PORT || 17842);
 const VALID_EFFORTS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh']);
 const TRAY_ICON = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAkElEQVR4nO2XSw6AMAhEwXj/K+PKpLF8ay1pZLbWmQcYUYDS34WeQ0REwwGIaoZ68U2wF+RYEa75sQCzwzVfsQOr1M3Fqt56qKIep2UWCX6e9YwyfQQugEj10fv26EABFEABpAOMbsctXsXuZXRXM2MbtmLNvvogAegLSB8BCzC6/SxxvmIHZkNIfun/BaV0XTuOPDLd7faPAAAAAElFTkSuQmCC';
+const UPDATE_CHECK_URL = 'https://api.github.com/repos/cesarfavero/codexrouter/releases/latest';
 
 let mainWindow = null;
 let tray = null;
@@ -16,6 +17,7 @@ let routerServer = null;
 let routerPort = DEFAULT_PORT;
 let isQuitting = false;
 let corePromise = null;
+let updateTimer = null;
 const logs = [];
 
 function moduleUrl(relative) {
@@ -51,6 +53,26 @@ function sendEvent(payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('codexrouter:event', payload);
   }
+}
+
+async function checkForUpdates() {
+  try {
+    const response = await fetch(UPDATE_CHECK_URL, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'CodexRouter' } });
+    if (!response.ok) return;
+    const release = await response.json();
+    const version = String(release.tag_name || '').replace(/^v/, '');
+    if (version && isNewerVersion(version, app.getVersion())) sendEvent({ type: 'update-available', version, url: release.html_url });
+  } catch {}
+}
+
+function isNewerVersion(candidate, current) {
+  const parse = value => String(value).split('.').map(part => Number.parseInt(part, 10) || 0);
+  const next = parse(candidate);
+  const installed = parse(current);
+  for (let index = 0; index < 3; index += 1) {
+    if (next[index] !== installed[index]) return next[index] > installed[index];
+  }
+  return false;
 }
 
 async function withOperation(name, work) {
@@ -96,7 +118,11 @@ async function snapshot() {
       isActive: registry.defaultAccountId === account.id,
       preferredModel: account.preferredModel ?? null,
       preferredEffort: account.preferredEffort ?? null,
-      availableModels: account.availableModels ?? [],
+      availableModels: account.availableModels?.length
+        ? account.availableModels
+        : (catalog.summarizeNativeModels(auth.readCachedNativeCatalog(account.codexHome) ?? [])
+          .concat(account.preferredModel ? [{ slug: account.preferredModel, name: account.preferredModel }] : [])
+          .filter((item, index, list) => list.findIndex(candidate => candidate.slug === item.slug) === index)),
       modelCount: account.nativeModelCount ?? 0,
       usage: usageSnapshot,
       usageError,
@@ -243,7 +269,9 @@ function registerIpc() {
     const model = preferences?.preferredModel == null ? account.preferredModel : String(preferences.preferredModel);
     const effort = preferences?.preferredEffort == null ? null : String(preferences.preferredEffort);
     if (effort && !VALID_EFFORTS.has(effort)) throw new Error(`Unsupported reasoning effort: ${effort}`);
-    if (model && account.availableModels?.length && !account.availableModels.some(item => item.slug === model)) {
+    const cachedModels = catalog.summarizeNativeModels(auth.readCachedNativeCatalog(account.codexHome) ?? []);
+    const availableModels = account.availableModels?.length ? account.availableModels : cachedModels;
+    if (model && availableModels.length && !availableModels.some(item => item.slug === model)) {
       throw new Error(`Model “${model}” is not available for ${account.label}. Refresh the gateway catalog first.`);
     }
     store.updateAccount(account.id, { preferredModel: model || null, preferredEffort: effort || null });
@@ -445,7 +473,7 @@ if (!lock) {
   app.quit();
 } else {
   app.on('second-instance', showWindow);
-  app.on('before-quit', () => { isQuitting = true; });
+  app.on('before-quit', () => { isQuitting = true; if (updateTimer) clearInterval(updateTimer); });
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin' && !tray) app.quit();
   });
@@ -457,6 +485,8 @@ if (!lock) {
     createTray();
     const hidden = process.argv.includes('--hidden');
     createWindow({ hidden });
+    void checkForUpdates();
+    updateTimer = setInterval(() => void checkForUpdates(), 6 * 60 * 60 * 1000);
     await restoreRuntimeIfInstalled();
   }).catch(error => {
     console.error(error);

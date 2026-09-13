@@ -1,5 +1,7 @@
 # CodexRouter
 
+[English](README.md) · [Português](docs/README.pt-BR.md) · [简体中文](docs/README.zh-CN.md)
+
 **One Codex model. Multiple isolated ChatGPT accounts managed from one desktop app.**
 
 CodexRouter keeps the native Codex interface but exposes only one managed model:
@@ -11,6 +13,12 @@ CodexRouter
 The desktop app decides which authenticated account and which native Codex model sit behind that gateway.
 
 > Status: early desktop MVP. This project is not affiliated with OpenAI.
+
+## Download
+
+The macOS desktop app is published in [GitHub Releases](https://github.com/cesarfavero/codexrouter/releases). Download the DMG matching your Mac, drag CodexRouter to Applications, and open it. The official Codex CLI must be installed separately.
+
+For installation from source, see [docs/installation-from-source.md](docs/installation-from-source.md).
 
 ## Experience
 
@@ -217,7 +225,7 @@ codexrouter uninstall
 - the renderer never receives raw auth tokens;
 - normal auth refresh is delegated to the installed Codex CLI;
 - usage telemetry is passive and never consumes rate-limit reset credits;
-- there is no automatic quota-evasion rotation.
+- automatic failover is limited to configured accounts and never combines their quotas.
 
 ## Development
 
@@ -233,6 +241,8 @@ Build a macOS package:
 ```bash
 npm run desktop:package
 ```
+
+Release artifacts include a DMG, ZIP and SHA-256 checksums. Builds requiring Apple Developer signing and notarization must provide the corresponding credentials in GitHub Actions; credentials are never stored in this repository.
 
 ## Open-source ancestry
 
