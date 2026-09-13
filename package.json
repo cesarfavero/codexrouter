@@ -1,0 +1,22 @@
+{
+  "name": "codexrouter",
+  "version": "0.1.0",
+  "description": "Multi-account router for Codex using native ChatGPT login profiles and model aliases.",
+  "type": "module",
+  "bin": {
+    "codexrouter": "./src/cli.js",
+    "cxr": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/cli.js && node --check src/router.js && node --check src/catalog.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cesarfavero/codexrouter.git"
+  }
+}
