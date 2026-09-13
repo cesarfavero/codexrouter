@@ -1,0 +1,435 @@
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage } = require('electron');
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawn, spawnSync } = require('node:child_process');
+const { once } = require('node:events');
+const { pathToFileURL } = require('node:url');
+const { getAutostart, setAutostart } = require('./autostart.cjs');
+
+const DEFAULT_PORT = Number(process.env.CODEXROUTER_PORT || 17842);
+const TRAY_ICON = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAkElEQVR4nO2XSw6AMAhEwXj/K+PKpLF8ay1pZLbWmQcYUYDS34WeQ0REwwGIaoZ68U2wF+RYEa75sQCzwzVfsQOr1M3Fqt56qKIep2UWCX6e9YwyfQQugEj10fv26EABFEABpAOMbsctXsXuZXRXM2MbtmLNvvogAegLSB8BCzC6/SxxvmIHZkNIfun/BaV0XTuOPDLd7faPAAAAAElFTkSuQmCC';
+
+let mainWindow = null;
+let tray = null;
+let routerServer = null;
+let routerPort = DEFAULT_PORT;
+let isQuitting = false;
+let corePromise = null;
+const logs = [];
+
+function moduleUrl(relative) {
+  return pathToFileURL(path.join(__dirname, '..', '..', relative)).href;
+}
+
+async function core() {
+  if (!corePromise) {
+    corePromise = Promise.all([
+      import(moduleUrl('src/store.js')),
+      import(moduleUrl('src/auth.js')),
+      import(moduleUrl('src/catalog.js')),
+      import(moduleUrl('src/integration.js')),
+      import(moduleUrl('src/router.js')),
+      import(moduleUrl('src/paths.js')),
+    ]).then(([store, auth, catalog, integration, router, paths]) => ({
+      store, auth, catalog, integration, router, paths,
+    }));
+  }
+  return corePromise;
+}
+
+function record(level, message) {
+  const item = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, level, message, at: new Date().toISOString() };
+  logs.push(item);
+  if (logs.length > 250) logs.splice(0, logs.length - 250);
+  sendEvent({ type: 'log', record: item });
+  return item;
+}
+
+function sendEvent(payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('codexrouter:event', payload);
+  }
+}
+
+async function withOperation(name, work) {
+  sendEvent({ type: 'operation', operation: { name, status: 'running', startedAt: new Date().toISOString() } });
+  try {
+    const result = await work();
+    sendEvent({ type: 'operation', operation: { name, status: 'complete', completedAt: new Date().toISOString() } });
+    return result;
+  } catch (error) {
+    const message = error?.message || String(error);
+    record('error', `${name}: ${message}`);
+    sendEvent({ type: 'operation', operation: { name, status: 'failed', message, completedAt: new Date().toISOString() } });
+    throw error;
+  } finally {
+    refreshTray();
+  }
+}
+
+function safeCatalogModels(catalog) {
+  if (Array.isArray(catalog)) return catalog;
+  return Array.isArray(catalog?.models) ? catalog.models : [];
+}
+
+async function snapshot() {
+  const { store, auth, integration, paths } = await core();
+  const registry = store.loadRegistry();
+  let catalog = null;
+  try { catalog = JSON.parse(fs.readFileSync(paths.catalogPath(), 'utf8')); } catch {}
+
+  const accounts = registry.accounts.map(account => {
+    let identity = null;
+    try { identity = auth.inspectAuth(account.codexHome); } catch {}
+    const modelCount = safeCatalogModels(catalog).filter(model =>
+      typeof model?.slug === 'string' && model.slug.startsWith(`codexrouter/${account.id}/`)
+    ).length;
+    return {
+      id: account.id,
+      label: account.label,
+      email: identity?.email ?? account.email ?? null,
+      plan: identity?.plan ?? account.plan ?? null,
+      connected: Boolean(identity?.accessToken),
+      expiresAt: identity?.expiresAt ?? null,
+      isDefault: registry.defaultAccountId === account.id,
+      modelCount,
+      createdAt: account.createdAt,
+    };
+  });
+
+  const installed = integration.integrationStatus();
+  const codexProbe = spawnSync(auth.codexBinary(), ['--version'], { encoding: 'utf8', timeout: 5000 });
+  return {
+    version: app.getVersion(),
+    platform: process.platform,
+    packaged: app.isPackaged,
+    accounts,
+    defaultAccountId: registry.defaultAccountId,
+    integration: { installed: installed.installed, port: installed.journal?.port ?? DEFAULT_PORT },
+    runtime: { running: Boolean(routerServer?.listening), port: routerPort },
+    autostart: getAutostart(app),
+    codex: {
+      available: !codexProbe.error && codexProbe.status === 0,
+      version: codexProbe.status === 0 ? String(codexProbe.stdout || codexProbe.stderr || '').trim() : null,
+    },
+    dataPath: paths.homeDir(),
+    catalogPath: paths.catalogPath(),
+    logs: [...logs],
+  };
+}
+
+async function startRuntime(preferredPort) {
+  if (routerServer?.listening) return snapshot();
+  const { router } = await core();
+  routerPort = Number(preferredPort || DEFAULT_PORT);
+  const server = router.startRouter({ port: routerPort });
+  routerServer = server;
+  if (!server.listening) await once(server, 'listening');
+  server.once('close', () => {
+    if (routerServer === server) routerServer = null;
+    sendEvent({ type: 'snapshot-invalidated' });
+    refreshTray();
+  });
+  server.on('error', error => record('error', `Router runtime: ${error.message}`));
+  record('info', `Router listening on 127.0.0.1:${routerPort}.`);
+  sendEvent({ type: 'snapshot-invalidated' });
+  return snapshot();
+}
+
+async function stopRuntime() {
+  const server = routerServer;
+  if (!server) return snapshot();
+  routerServer = null;
+  await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  record('info', 'Router stopped.');
+  sendEvent({ type: 'snapshot-invalidated' });
+  return snapshot();
+}
+
+async function syncCatalogBestEffort() {
+  const { store, catalog } = await core();
+  const registry = store.loadRegistry();
+  if (!registry.accounts.length) return null;
+  try {
+    const result = catalog.syncCatalog(registry);
+    record('info', `Model catalog synchronized for ${result.accountCatalogs.length} account(s).`);
+    return result;
+  } catch (error) {
+    record('warning', `Catalog sync deferred: ${error.message}`);
+    return null;
+  }
+}
+
+function validateLabel(value) {
+  const label = String(value || '').trim();
+  if (label.length < 1 || label.length > 80) throw new Error('Account name must be between 1 and 80 characters.');
+  return label;
+}
+
+async function authenticateAccount(account, operationName) {
+  const { auth, store } = await core();
+  sendEvent({ type: 'login-state', accountId: account.id, state: 'starting' });
+  const identity = await auth.loginInteractive(account.codexHome, {
+    onAuthUrl: url => sendEvent({ type: 'login-url', accountId: account.id, url }),
+    onState: state => sendEvent({ type: 'login-state', accountId: account.id, state }),
+  });
+  store.updateAccount(account.id, { email: identity.email, plan: identity.plan });
+  record('info', `${operationName} completed for ${account.label}.`);
+  await syncCatalogBestEffort();
+  sendEvent({ type: 'snapshot-invalidated' });
+  return snapshot();
+}
+
+function registerIpc() {
+  ipcMain.handle('codexrouter:snapshot', () => snapshot());
+
+  ipcMain.handle('codexrouter:account:add', (_event, rawLabel) => withOperation('Add account', async () => {
+    const { store } = await core();
+    const account = store.registerAccount(validateLabel(rawLabel));
+    record('info', `Created isolated Codex profile for ${account.label}.`);
+    return authenticateAccount(account, 'Authentication');
+  }));
+
+  ipcMain.handle('codexrouter:account:reauth', (_event, accountId) => withOperation('Re-authenticate account', async () => {
+    const { store } = await core();
+    const { account } = store.getAccount(String(accountId));
+    return authenticateAccount(account, 'Re-authentication');
+  }));
+
+  ipcMain.handle('codexrouter:account:remove', (_event, accountId) => withOperation('Remove account', async () => {
+    const { store, auth, integration, paths } = await core();
+    const { account } = store.getAccount(String(accountId));
+    auth.logout(account.codexHome);
+    store.removeAccount(account.id, { removeProfile: true });
+    record('info', `Removed ${account.label} and its isolated local Codex profile.`);
+    const registry = store.loadRegistry();
+    if (registry.accounts.length) {
+      await syncCatalogBestEffort();
+    } else {
+      fs.rmSync(paths.catalogPath(), { force: true });
+      await stopRuntime();
+      if (integration.integrationStatus().installed) integration.uninstallIntegration();
+    }
+    sendEvent({ type: 'snapshot-invalidated' });
+    return snapshot();
+  }));
+
+  ipcMain.handle('codexrouter:account:default', (_event, accountId) => withOperation('Set default account', async () => {
+    const { store } = await core();
+    store.setDefaultAccount(String(accountId));
+    await syncCatalogBestEffort();
+    sendEvent({ type: 'snapshot-invalidated' });
+    return snapshot();
+  }));
+
+  ipcMain.handle('codexrouter:catalog:sync', () => withOperation('Sync model catalog', async () => {
+    const { store, catalog } = await core();
+    const result = catalog.syncCatalog(store.loadRegistry());
+    record('info', `Model catalog synchronized for ${result.accountCatalogs.length} account(s).`);
+    sendEvent({ type: 'snapshot-invalidated' });
+    return snapshot();
+  }));
+
+  ipcMain.handle('codexrouter:integration:install', () => withOperation('Install Codex integration', async () => {
+    const { store, catalog, integration } = await core();
+    catalog.syncCatalog(store.loadRegistry());
+    const journal = integration.installIntegration({ port: DEFAULT_PORT });
+    record('info', 'Codex integration installed. Restart Codex to refresh the model picker.');
+    await startRuntime(journal.port);
+    return snapshot();
+  }));
+
+  ipcMain.handle('codexrouter:integration:uninstall', () => withOperation('Uninstall Codex integration', async () => {
+    const { integration } = await core();
+    await stopRuntime();
+    if (integration.integrationStatus().installed) integration.uninstallIntegration();
+    record('info', 'Codex integration removed and previous config restored.');
+    return snapshot();
+  }));
+
+  ipcMain.handle('codexrouter:runtime:start', () => withOperation('Start router', async () => {
+    const { integration } = await core();
+    const status = integration.integrationStatus();
+    return startRuntime(status.journal?.port ?? DEFAULT_PORT);
+  }));
+
+  ipcMain.handle('codexrouter:runtime:stop', () => withOperation('Stop router', stopRuntime));
+
+  ipcMain.handle('codexrouter:open-codex', async () => {
+    const { auth } = await core();
+    const child = spawn(auth.codexBinary(), ['app'], { detached: true, stdio: 'ignore', env: process.env });
+    child.unref();
+    record('info', 'Requested Codex Desktop launch.');
+    return { ok: true };
+  });
+
+  ipcMain.handle('codexrouter:autostart:set', (_event, enabled) => {
+    const result = setAutostart(app, Boolean(enabled));
+    record('info', `Launch at login ${result.enabled ? 'enabled' : 'disabled'}.`);
+    refreshTray();
+    sendEvent({ type: 'snapshot-invalidated' });
+    return result;
+  });
+
+  ipcMain.handle('codexrouter:open-external', (_event, rawUrl) => {
+    const url = new URL(String(rawUrl));
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Only HTTP(S) links are allowed.');
+    return shell.openExternal(url.href);
+  });
+
+  ipcMain.handle('codexrouter:reveal-data', async () => {
+    const { paths } = await core();
+    fs.mkdirSync(paths.homeDir(), { recursive: true });
+    shell.showItemInFolder(paths.homeDir());
+    return { ok: true };
+  });
+}
+
+function createWindow({ hidden = false } = {}) {
+  const window = new BrowserWindow({
+    width: 1040,
+    height: 720,
+    minWidth: 820,
+    minHeight: 580,
+    show: false,
+    backgroundColor: '#181818',
+    title: 'CodexRouter',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 16 } : undefined,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+    },
+  });
+
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  window.webContents.on('will-navigate', (event, url) => {
+    const current = window.webContents.getURL();
+    if (url !== current) event.preventDefault();
+  });
+  window.on('close', event => {
+    if (!isQuitting && tray) {
+      event.preventDefault();
+      window.hide();
+    }
+  });
+
+  const devUrl = process.env.CODEXROUTER_RENDERER_URL;
+  if (devUrl) void window.loadURL(devUrl);
+  else void window.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+
+  window.once('ready-to-show', () => {
+    if (!hidden) window.show();
+  });
+  mainWindow = window;
+  return window;
+}
+
+function showWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function trayImage() {
+  const image = nativeImage.createFromDataURL(`data:image/png;base64,${TRAY_ICON}`);
+  if (process.platform === 'darwin') image.setTemplateImage(true);
+  return image.resize({ width: 16, height: 16 });
+}
+
+function refreshTray() {
+  if (!tray) return;
+  const autostart = getAutostart(app);
+  const running = Boolean(routerServer?.listening);
+  tray.setToolTip(`CodexRouter · ${running ? 'Running' : 'Stopped'}`);
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open CodexRouter', click: showWindow },
+    { label: 'Open Codex', click: () => void ipcMain.emit('codexrouter:tray-open-codex') },
+    { type: 'separator' },
+    { label: running ? `Router running · :${routerPort}` : 'Router stopped', enabled: false },
+    {
+      label: running ? 'Stop Router' : 'Start Router',
+      click: () => void withOperation(running ? 'Stop router' : 'Start router', async () => {
+        if (running) return stopRuntime();
+        const { integration } = await core();
+        return startRuntime(integration.integrationStatus().journal?.port ?? DEFAULT_PORT);
+      }),
+    },
+    {
+      label: 'Add Account…',
+      click: () => {
+        showWindow();
+        sendEvent({ type: 'open-add-account' });
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Launch at Login',
+      type: 'checkbox',
+      checked: autostart.enabled,
+      enabled: autostart.supported,
+      click: item => {
+        try { setAutostart(app, item.checked); } catch (error) { record('error', error.message); }
+        refreshTray();
+        sendEvent({ type: 'snapshot-invalidated' });
+      },
+    },
+    { type: 'separator' },
+    { label: 'Quit CodexRouter', click: () => { isQuitting = true; app.quit(); } },
+  ]));
+}
+
+function createTray() {
+  tray = new Tray(trayImage());
+  tray.on('click', showWindow);
+  refreshTray();
+}
+
+async function restoreRuntimeIfInstalled() {
+  const { integration } = await core();
+  const status = integration.integrationStatus();
+  if (!status.installed) return;
+  try { await startRuntime(status.journal?.port ?? DEFAULT_PORT); }
+  catch (error) { record('error', `Could not restore router runtime: ${error.message}`); }
+}
+
+function wireInternalEvents() {
+  ipcMain.on('codexrouter:tray-open-codex', async () => {
+    try {
+      const { auth } = await core();
+      const child = spawn(auth.codexBinary(), ['app'], { detached: true, stdio: 'ignore', env: process.env });
+      child.unref();
+    } catch (error) {
+      record('error', `Open Codex: ${error.message}`);
+    }
+  });
+}
+
+const lock = app.requestSingleInstanceLock();
+if (!lock) {
+  app.quit();
+} else {
+  app.on('second-instance', showWindow);
+  app.on('before-quit', () => { isQuitting = true; });
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin' && !tray) app.quit();
+  });
+  app.on('activate', showWindow);
+
+  app.whenReady().then(async () => {
+    registerIpc();
+    wireInternalEvents();
+    createTray();
+    const hidden = process.argv.includes('--hidden');
+    createWindow({ hidden });
+    await restoreRuntimeIfInstalled();
+  }).catch(error => {
+    console.error(error);
+    app.quit();
+  });
+}

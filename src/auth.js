@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { ensureDir, readJson, writeTextAtomic } from './fs-util.js';
 
 export function codexBinary() {
@@ -34,6 +34,82 @@ function runCodex(codexHome, args, options = {}) {
     throw new Error(`codex ${args.join(' ')} exited with code ${result.status}${detail ? `: ${detail}` : ''}`);
   }
   return result;
+}
+
+export function extractLoginAuthUrl(output) {
+  if (typeof output !== 'string') return null;
+  const explicit = /navigate to this URL to authenticate:\s*(https:\/\/[^\s]+)/i.exec(output)?.[1];
+  if (explicit) return explicit.replace(/[),.;]+$/, '');
+  const authOpenAi = /(https:\/\/auth\.openai\.com\/[^\s]+)/i.exec(output)?.[1];
+  return authOpenAi ? authOpenAi.replace(/[),.;]+$/, '') : null;
+}
+
+/**
+ * Starts the official `codex login` browser OAuth flow for one isolated CODEX_HOME.
+ * Codex owns the local callback server, token exchange, persistence and refresh semantics.
+ * CodexRouter only observes the public auth URL so a desktop launcher can surface it.
+ */
+export function loginInteractive(codexHome, {
+  onAuthUrl,
+  onState,
+  timeout = 10 * 60 * 1000,
+} = {}) {
+  prepareAccountCodexHome(codexHome);
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(codexBinary(), ['login'], {
+      env: { ...process.env, CODEX_HOME: codexHome },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let combined = '';
+    let reportedUrl = null;
+    let settled = false;
+    const finish = (callback) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback();
+    };
+
+    const consume = chunk => {
+      const text = String(chunk ?? '');
+      combined = `${combined}${text}`.slice(-16_384);
+      if (!reportedUrl) {
+        const url = extractLoginAuthUrl(combined);
+        if (url) {
+          reportedUrl = url;
+          onAuthUrl?.(url);
+          onState?.('waiting-for-browser');
+        }
+      }
+    };
+
+    child.stdout?.on('data', consume);
+    child.stderr?.on('data', consume);
+    child.once('error', error => finish(() => reject(error)));
+    child.once('exit', (code, signal) => {
+      if (code === 0) {
+        finish(() => {
+          try {
+            onState?.('authenticated');
+            resolve(inspectAuth(codexHome));
+          } catch (error) {
+            reject(error);
+          }
+        });
+        return;
+      }
+      const suffix = signal ? ` (signal ${signal})` : '';
+      finish(() => reject(new Error(`codex login exited with code ${code ?? 'unknown'}${suffix}.`)));
+    });
+
+    onState?.('starting');
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      finish(() => reject(new Error('Codex login timed out before authentication completed.')));
+    }, timeout);
+  });
 }
 
 export function login(codexHome) {

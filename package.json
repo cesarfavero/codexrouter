@@ -1,15 +1,37 @@
 {
   "name": "codexrouter",
-  "version": "0.1.0",
-  "description": "Multi-account router for Codex using native ChatGPT login profiles and model aliases.",
+  "version": "0.2.0",
+  "description": "Desktop-first multi-account router for Codex using native ChatGPT login profiles and account-qualified model aliases.",
   "type": "module",
+  "main": "desktop/electron/main.cjs",
   "bin": {
     "codexrouter": "./src/cli.js",
     "cxr": "./src/cli.js"
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/cli.js && node --check src/router.js && node --check src/catalog.js"
+    "check": "node --check src/cli.js && node --check src/router.js && node --check src/catalog.js && node --check src/auth.js && node --check desktop/electron/main.cjs && node --check desktop/electron/preload.cjs && node --check desktop/electron/autostart.cjs && node --check desktop/scripts/dev.cjs && node --check scripts/e2e-macos.mjs",
+    "desktop:dev": "node desktop/scripts/dev.cjs",
+    "desktop:typecheck": "tsc -p desktop/tsconfig.json --noEmit",
+    "desktop:build": "vite build --config desktop/vite.config.ts",
+    "desktop:package": "npm run desktop:typecheck && npm run desktop:build && electron-builder --mac",
+    "desktop:package:all": "npm run desktop:typecheck && npm run desktop:build && electron-builder -mwl",
+    "e2e:mac": "node scripts/e2e-macos.mjs"
+  },
+  "dependencies": {
+    "motion": "^12.42.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^41.10.7",
+    "electron-builder": "^26.8.1",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.0"
   },
   "engines": {
     "node": ">=20"
@@ -18,5 +40,51 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/cesarfavero/codexrouter.git"
+  },
+  "build": {
+    "appId": "com.codexrouter.desktop",
+    "productName": "CodexRouter",
+    "artifactName": "codexrouter-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/dist/**",
+      "desktop/electron/**",
+      "src/**",
+      "package.json",
+      "LICENSE",
+      "LICENSES/**",
+      "THIRD_PARTY_NOTICES.md"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "minimumSystemVersion": "13.0",
+      "hardenedRuntime": true,
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "category": "Development",
+      "target": [
+        "AppImage"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true
+    }
   }
 }
