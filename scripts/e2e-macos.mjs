@@ -4,9 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { codexBinary, inspectAuth, loginStatus } from '../src/auth.js';
-import { aliasSlug, syncCatalog } from '../src/catalog.js';
-import { catalogPath } from '../src/paths.js';
+import { codexBinary, fetchNativeCatalog, inspectAuth, loginStatus } from '../src/auth.js';
+import { aliasSlug, buildCombinedCatalog } from '../src/catalog.js';
 import { startRouter } from '../src/router.js';
 import { loadRegistry } from '../src/store.js';
 
@@ -34,6 +33,9 @@ if (accounts.length !== 2) {
 }
 if (accounts[0].id === accounts[1].id) throw new Error('Choose two different accounts.');
 
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'codexrouter-e2e-'));
+const temporaryCatalogPath = path.join(scratch, 'model-catalog.json');
+
 console.log(`CodexRouter real E2E: ${accounts[0].label} ↔ ${accounts[1].label}`);
 for (const account of accounts) {
   const identity = inspectAuth(account.codexHome);
@@ -41,23 +43,32 @@ for (const account of accounts) {
   console.log(`✓ ${account.label}: ${identity.email || 'authenticated'} · ${identity.plan || 'plan unknown'} · ${status}`);
 }
 
-const synchronized = syncCatalog({ ...registry, accounts });
-const commonModel = selectCommonModel(synchronized.accountCatalogs);
+const accountCatalogs = accounts.map(account => ({
+  account,
+  catalog: fetchNativeCatalog(account.codexHome),
+}));
+const commonModel = selectCommonModel(accountCatalogs);
 if (!commonModel) throw new Error('The selected accounts do not expose a common list-visible Codex model.');
+const combinedCatalog = buildCombinedCatalog(accountCatalogs, accounts[0].id);
+fs.writeFileSync(temporaryCatalogPath, `${JSON.stringify(combinedCatalog, null, 2)}\n`, { mode: 0o600 });
 console.log(`✓ Common native model: ${commonModel}`);
 
 const server = startRouter({ port: PORT });
 if (!server.listening) await once(server, 'listening');
 console.log(`✓ Test router: http://127.0.0.1:${PORT}/v1`);
 
-const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'codexrouter-e2e-'));
 let failed = false;
 try {
   for (const account of accounts) {
     const alias = aliasSlug(account.id, commonModel);
     const outputFile = path.join(scratch, `${account.id}.txt`);
     console.log(`→ ${alias}`);
-    const result = await runCodexExec({ accountHome: accounts[0].codexHome, alias, outputFile });
+    const result = await runCodexExec({
+      accountHome: accounts[0].codexHome,
+      alias,
+      catalogFile: temporaryCatalogPath,
+      outputFile,
+    });
     if (result.code !== 0) {
       throw new Error(`Codex exec failed for ${account.label} (code ${result.code}).\n${tail(result.stderr || result.stdout)}`);
     }
@@ -96,14 +107,14 @@ function selectCommonModel(accountCatalogs) {
     || null;
 }
 
-function runCodexExec({ accountHome, alias, outputFile }) {
+function runCodexExec({ accountHome, alias, catalogFile, outputFile }) {
   const args = [
     'exec',
     '--ephemeral',
     '--skip-git-repo-check',
     '-m', alias,
     '-c', `openai_base_url="http://127.0.0.1:${PORT}/v1"`,
-    '-c', `model_catalog_json="${escapeToml(catalogPath())}"`,
+    '-c', `model_catalog_json="${escapeToml(catalogFile)}"`,
     '--output-last-message', outputFile,
     `Respond with exactly ${SUCCESS} and nothing else. Do not call tools.`,
   ];
