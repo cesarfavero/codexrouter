@@ -1,11 +1,12 @@
 const path = require('node:path');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
+const { resolvePackageBin } = require('./package-bin.cjs');
 
 const root = path.resolve(__dirname, '..', '..');
 const rendererUrl = process.env.CODEXROUTER_RENDERER_URL || 'http://127.0.0.1:5173';
 const renderer = new URL(rendererUrl);
-const viteBin = require.resolve('vite/bin/vite.js');
+const viteBin = resolvePackageBin('vite');
 const electronBin = require('electron');
 
 function waitForPort(host, port, timeout = 20_000) {

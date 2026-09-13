@@ -23,6 +23,8 @@ jobs:
         run: npm test
       - name: Syntax checks
         run: npm run check
+      - name: Desktop dev launcher smoke
+        run: npm run desktop:dev:smoke
       - name: Desktop typecheck
         run: npm run desktop:typecheck
       - name: Desktop renderer build
