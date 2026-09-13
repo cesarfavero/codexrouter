@@ -32,3 +32,5 @@ O app permite escolher o modelo nativo e o reasoning effort padrão (`minimal`, 
 O CodexRouter informa quando uma nova versão está disponível no GitHub Releases. Tokens, cookies e arquivos `auth.json` permanecem locais; o gateway escuta apenas em `127.0.0.1`.
 
 Veja a documentação completa em [README.md](../README.md). Licença MIT.
+
+O código pode ser copiado e modificado conforme a licença MIT, desde que os avisos sejam preservados. Forks e versões modificadas não podem usar o nome ou logo CodexRouter para parecerem oficiais, nem remover os avisos de licença e atribuição. Consulte [`TRADEMARKS.md`](../TRADEMARKS.md).

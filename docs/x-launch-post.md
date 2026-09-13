@@ -9,6 +9,8 @@ Use multiple isolated ChatGPT accounts with Codex through one local gateway. Pic
 ✅ Local-only credentials
 ✅ Automatic usage-aware account failover
 
+Open source under the MIT License. Forks are welcome, but modified builds must use a different name and logo and must not present themselves as the official CodexRouter app.
+
 Download the latest release: https://github.com/cesarfavero/codexrouter/releases
 
 #Codex #OpenAI #Developers #MacOS

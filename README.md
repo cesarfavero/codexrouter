@@ -258,6 +258,6 @@ Detailed attribution is in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). W
 
 CodexRouter deliberately does **not** include the upstream ChatGPT Web browser worker, DOM automation, Temporary Chat transport, Playwright login, cookie import or MCP browser harness.
 
-## License
+## License and branding
 
-CodexRouter is MIT licensed. See [`LICENSE`](LICENSE).
+CodexRouter source code is MIT licensed. You may fork and modify the code if you preserve the license, copyright and third-party notices. Modified builds must use a distinct name and logo and may not present themselves as the official CodexRouter app or imply endorsement. See [`TRADEMARKS.md`](TRADEMARKS.md) for the branding policy.

@@ -32,3 +32,5 @@ npm run desktop:dev
 当 GitHub Releases 发布新版本时，CodexRouter 会提示有可用更新。Token、Cookie 和 `auth.json` 始终保存在本地；网关只监听 `127.0.0.1`。
 
 完整文档请参阅 [英文 README](../README.md)。许可证：MIT。
+
+根据 MIT 许可证，代码可以复制和修改，但必须保留许可证和版权声明。Fork 或修改版本不得使用 CodexRouter 名称或 Logo 冒充官方版本，也不得删除归属声明。请参阅 [`TRADEMARKS.md`](../TRADEMARKS.md)。
