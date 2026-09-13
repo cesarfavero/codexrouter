@@ -28,4 +28,4 @@ Prefer the official installed Codex CLI for login, logout, status and refresh be
 
 ## Changes
 
-For repository work, create/link an Issue, use a branch, make focused commits, open a PR, run tests/checks, review, and merge completed work to `main` unless an issue explicitly requires otherwise.
+For repository work, create/link an Issue, use a branch, make focused commits, open a PR, run tests/checks, review, and merge completed work to `main` unless an issue explicitly requires otherwise. After each validated code or product update, increment the version when applicable, build the distributable artifacts, and publish the corresponding GitHub release.
