@@ -51,6 +51,7 @@ export function registerAccount(label, metadata = {}) {
     email: metadata.email ?? null,
     plan: metadata.plan ?? null,
     preferredEffort: metadata.preferredEffort ?? null,
+    modelSelectionSource: 'automatic',
     createdAt: new Date().toISOString(),
   };
   registry.accounts.push(account);

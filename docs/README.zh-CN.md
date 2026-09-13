@@ -2,7 +2,7 @@
 
 [English](../README.md) · [Português](README.pt-BR.md) · [简体中文](README.zh-CN.md)
 
-CodexRouter 是一个本地网关，可在 Codex 中管理多个相互隔离的 ChatGPT 账户，同时只显示一个原生模型：`CodexRouter`。
+CodexRouter 是一个本地网关，可在 Codex 中管理多个相互隔离的 ChatGPT 账户，同时显示所有原生模型和按账户区分的别名。
 
 ## 下载
 

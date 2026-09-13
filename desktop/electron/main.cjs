@@ -274,7 +274,7 @@ function registerIpc() {
     if (model && availableModels.length && !availableModels.some(item => item.slug === model)) {
       throw new Error(`Model “${model}” is not available for ${account.label}. Refresh the gateway catalog first.`);
     }
-    store.updateAccount(account.id, { preferredModel: model || null, preferredEffort: effort || null });
+    store.updateAccount(account.id, { preferredModel: model || null, preferredEffort: effort || null, modelSelectionSource: 'user' });
     await syncCatalogBestEffort();
     sendEvent({ type: 'snapshot-invalidated' });
     return snapshot();

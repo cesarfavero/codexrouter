@@ -2,7 +2,7 @@
 
 [English](../README.md) · [Português](README.pt-BR.md) · [简体中文](README.zh-CN.md)
 
-Um gateway local para usar vários perfis isolados do ChatGPT com o Codex, mantendo um único modelo `CodexRouter` no seletor nativo.
+Um gateway local para usar vários perfis isolados do ChatGPT com o Codex, mantendo todos os modelos nativos e aliases por conta no seletor.
 
 ## Download
 

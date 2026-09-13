@@ -2,9 +2,9 @@
 
 [English](README.md) · [Português](docs/README.pt-BR.md) · [简体中文](docs/README.zh-CN.md)
 
-**One Codex model. Multiple isolated ChatGPT accounts managed from one desktop app.**
+**All Codex models. Multiple isolated ChatGPT accounts managed from one desktop app.**
 
-CodexRouter keeps the native Codex interface but exposes only one managed model:
+CodexRouter keeps the native Codex interface and exposes the native model catalog plus managed account aliases:
 
 ```text
 CodexRouter
@@ -35,18 +35,20 @@ Install & start gateway
       ↓
 Open Codex
       ↓
-select “CodexRouter” once
+select a Codex model
 ```
 
-There are no `GPT-X · Cesar`, `GPT-X · Eduardo`, etc. rows in Codex anymore. Account management stays in the CodexRouter app.
+Native Codex models remain visible in Codex. Models belonging to another connected account appear with a qualified CodexRouter slug and account label; account management and effort controls stay in the CodexRouter app.
 
 ## Gateway behavior
 
-The generated Codex catalog contains exactly one visible managed row:
+The generated Codex catalog contains the managed gateway plus visible native models from connected accounts:
 
 ```text
 slug: codexrouter/gateway
 display: CodexRouter
+gpt-5.5
+codexrouter/<account-id>/<native-model>
 ```
 
 For the active account, CodexRouter discovers the real list-visible models through the installed Codex CLI and selects a valid native model. A request then becomes:
@@ -145,7 +147,7 @@ CODEX_BIN=/path/to/codex npm run desktop:dev
 5. Add any other authorized accounts.
 6. Choose **Use for gateway** on the account you want active.
 7. Open **Setup** and click **Install & start**.
-8. Restart/open Codex and select **CodexRouter**.
+8. Restart/open Codex and select the model you want. Use **CodexRouter** for the active account default or a qualified account model for a specific account.
 
 The integration manages only these top-level Codex settings:
 

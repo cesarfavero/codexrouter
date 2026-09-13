@@ -122,7 +122,7 @@ function AccountsSurface({ snapshot, onAdd, onRefresh, setError, setLogin }: {
       <SurfaceHeader
         eyebrow="Gateway"
         title="One model in Codex. Accounts live here."
-        body={`Codex only sees “${snapshot.gateway.displayName}”. This app controls which account and native Codex model the gateway uses.`}
+        body={`Codex shows the native models from your connected accounts. This app controls account routing, model defaults and effort.`}
         actions={<PrimaryButton icon="plus" onClick={onAdd}>Add Account</PrimaryButton>}
       />
 
@@ -155,7 +155,7 @@ function AccountsSurface({ snapshot, onAdd, onRefresh, setError, setLogin }: {
         <SecondaryButton icon="refresh" onClick={async () => {
           try { await api!.syncCatalog(); await onRefresh(); } catch (cause) { setError(messageOf(cause)); }
         }}>Refresh gateway</SecondaryButton>
-        <p>Refresh reads the real Codex catalog for each account and rebuilds the single managed model.</p>
+        <p>Refresh reads the real Codex catalog for each connected account and rebuilds the model list.</p>
       </div>
     </>
   );

@@ -2,7 +2,7 @@
 import http from 'node:http';
 import { Readable } from 'node:stream';
 import { freshAuth } from './auth.js';
-import { GATEWAY_SLUG, isGatewaySlug } from './catalog.js';
+import { GATEWAY_SLUG, isGatewaySlug, parseAccountModelSlug } from './catalog.js';
 import { allAccounts, defaultAccount, setDefaultAccount } from './store.js';
 import { catalogPath } from './paths.js';
 import { readJson } from './fs-util.js';
@@ -49,14 +49,24 @@ export function startRouter({
 
       if (raw.length && contentType.includes('application/json')) {
         const parsed = JSON.parse(raw.toString('utf8'));
-        gatewayRequest = isGatewaySlug(parsed?.model);
+        const qualified = parseAccountModelSlug(parsed?.model);
+        const requestedModel = parsed?.model;
+        gatewayRequest = isGatewaySlug(requestedModel) || Boolean(qualified) || typeof requestedModel === 'string';
         if (gatewayRequest) {
-          account = await selectGatewayAccount(account, usageReader);
-          if (!account.preferredModel) throw httpError(503, `The active account “${account.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);
+          if (qualified) {
+            account = allAccounts().find(candidate => candidate.id === qualified.accountId);
+            if (!account) throw httpError(400, `Unknown CodexRouter account model: ${requestedModel}`);
+            const usage = await readUsageSafely(usageReader, account);
+            if (!usageIsHealthy(usage)) throw cooldownError(account, usage);
+            parsed.model = qualified.modelSlug;
+          } else {
+            account = await selectGatewayAccount(account, usageReader);
+            if (!account.preferredModel) throw httpError(503, `The active account “${account.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);
+            parsed.model = isGatewaySlug(requestedModel) ? account.preferredModel : requestedModel;
+          }
           if (account.preferredEffort) {
             parsed.reasoning = { ...(parsed.reasoning || {}), effort: parsed.reasoning?.effort || account.preferredEffort };
           }
-          parsed.model = account.preferredModel;
           body = Buffer.from(JSON.stringify(parsed));
         }
       }
@@ -66,7 +76,7 @@ export function startRouter({
         await upstream.arrayBuffer();
         upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: true });
       }
-      if (gatewayRequest && upstream.status === 429) {
+      if (gatewayRequest && upstream.status === 429 && !parseAccountModelSlug(JSON.parse(body.toString('utf8')).model)) {
         const fallback = await selectGatewayAccount(account, usageReader, { force: true, exclude: new Set([account.id]) });
         if (fallback && fallback.id !== account.id) {
           if (!fallback.preferredModel) throw httpError(503, `The fallback account “${fallback.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);

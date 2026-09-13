@@ -7,9 +7,20 @@ import { saveRegistry } from './store.js';
 export const ROUTER_PREFIX = 'codexrouter/';
 export const GATEWAY_SLUG = 'codexrouter/gateway';
 export const GATEWAY_DISPLAY_NAME = 'CodexRouter';
+const DEFAULT_MODEL_ORDER = ['gpt-5.5', 'gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'];
 
 export function isGatewaySlug(value) {
   return value === GATEWAY_SLUG;
+}
+
+export function accountModelSlug(accountId, modelSlug) {
+  return `${ROUTER_PREFIX}${accountId}/${modelSlug}`;
+}
+
+export function parseAccountModelSlug(value) {
+  if (typeof value !== 'string' || !value.startsWith(ROUTER_PREFIX) || isGatewaySlug(value)) return null;
+  const [, accountId, ...modelParts] = value.split('/');
+  return accountId && modelParts.length ? { accountId, modelSlug: modelParts.join('/') } : null;
 }
 
 export function modelsFromCatalog(catalog) {
@@ -45,7 +56,9 @@ export function chooseNativeModel(catalog, preferredModel = null) {
   const models = listVisibleNativeModels(catalog);
   if (!models.length) return null;
   if (preferredModel && models.some(model => model.slug === preferredModel)) return preferredModel;
-  return models.find(model => model.is_default === true)?.slug ?? models[0].slug;
+  return DEFAULT_MODEL_ORDER.find(slug => models.some(model => model.slug === slug))
+    ?? models.find(model => model.is_default !== true)?.slug
+    ?? models[0].slug;
 }
 
 export function buildGatewayCatalog(accountCatalogs, activeAccountId) {
@@ -59,13 +72,26 @@ export function buildGatewayCatalog(accountCatalogs, activeAccountId) {
   const gateway = structuredClone(source);
   gateway.slug = GATEWAY_SLUG;
   gateway.display_name = GATEWAY_DISPLAY_NAME;
-  gateway.description = 'Single CodexRouter gateway. Account and native model are managed in the CodexRouter desktop app.';
+  gateway.description = 'CodexRouter managed gateway. Native Codex models and account-specific models are available in the Codex picker.';
   gateway.visibility = 'list';
   gateway.supported_in_api = true;
   gateway.is_default = true;
   gateway.upgrade = null;
   delete gateway.availability_nux;
-  return cloneCatalogWithModels(activeEntry.catalog, [gateway]);
+  const models = [gateway];
+  for (const { account, catalog } of accountCatalogs) {
+    for (const sourceModel of listVisibleNativeModels(catalog)) {
+      const model = structuredClone(sourceModel);
+      if (account.id !== activeEntry.account.id) {
+        model.slug = accountModelSlug(account.id, sourceModel.slug);
+        model.display_name = `${sourceModel.display_name ?? sourceModel.name ?? sourceModel.slug} · ${account.label}`;
+      }
+      model.visibility = 'list';
+      model.supported_in_api = true;
+      models.push(model);
+    }
+  }
+  return cloneCatalogWithModels(activeEntry.catalog, models.filter((model, index, list) => list.findIndex(item => item.slug === model.slug) === index));
 }
 
 export function syncCatalog(registry) {
@@ -83,9 +109,12 @@ export function syncCatalog(registry) {
   let registryChanged = false;
   for (const { account, catalog } of accountCatalogs) {
     const visible = listVisibleNativeModels(catalog);
-    const preferredModel = chooseNativeModel(catalog, account.preferredModel);
+    const preferredModel = account.modelSelectionSource === 'user'
+      ? chooseNativeModel(catalog, account.preferredModel)
+      : chooseNativeModel(catalog);
     if (account.preferredModel !== preferredModel || account.nativeModelCount !== visible.length) {
       account.preferredModel = preferredModel;
+      account.modelSelectionSource = account.modelSelectionSource === 'user' ? 'user' : 'automatic';
       account.nativeModelCount = visible.length;
       registryChanged = true;
     }
