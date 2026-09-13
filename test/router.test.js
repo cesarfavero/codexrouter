@@ -13,11 +13,10 @@ function jwt(payload) {
   return `${encode({ alg: 'none' })}.${encode(payload)}.sig`;
 }
 
-test('router maps alias model to the selected account and native model', async () => {
+async function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codexrouter-router-'));
   const previous = process.env.CODEXROUTER_HOME;
   process.env.CODEXROUTER_HOME = root;
-
   const cesarHome = path.join(root, 'accounts', 'cesar', 'codex-home');
   const eduardoHome = path.join(root, 'accounts', 'eduardo', 'codex-home');
   fs.mkdirSync(cesarHome, { recursive: true });
@@ -27,13 +26,24 @@ test('router maps alias model to the selected account and native model', async (
   writeJsonAtomic(path.join(eduardoHome, 'auth.json'), { tokens: { id_token: jwt({}), access_token: jwt({ exp, who: 'eduardo' }), refresh_token: 'r2', account_id: 'acct-eduardo' } });
   writeJsonAtomic(path.join(root, 'accounts.json'), {
     version: 1,
-    defaultAccountId: 'cesar',
+    defaultAccountId: 'eduardo',
     accounts: [
-      { id: 'cesar', label: 'Cesar', codexHome: cesarHome },
-      { id: 'eduardo', label: 'Eduardo', codexHome: eduardoHome },
+      { id: 'cesar', label: 'Cesar', codexHome: cesarHome, preferredModel: 'gpt-5.6-sol' },
+      { id: 'eduardo', label: 'Eduardo', codexHome: eduardoHome, preferredModel: 'gpt-5.5' },
     ],
   });
+  return {
+    root,
+    previous,
+    restore() {
+      if (previous === undefined) delete process.env.CODEXROUTER_HOME; else process.env.CODEXROUTER_HOME = previous;
+      fs.rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
 
+test('gateway routes through the explicitly active account and its preferred native model', async () => {
+  const state = await fixture();
   let seen = null;
   const upstream = http.createServer(async (req, res) => {
     const chunks = [];
@@ -44,28 +54,65 @@ test('router maps alias model to the selected account and native model', async (
   });
   upstream.listen(0, '127.0.0.1');
   await once(upstream, 'listening');
-  const upstreamPort = upstream.address().port;
 
-  const router = startRouter({ port: 0, upstreamBase: `http://127.0.0.1:${upstreamPort}` });
+  const router = startRouter({
+    port: 0,
+    upstreamBase: `http://127.0.0.1:${upstream.address().port}`,
+    usageReader: async () => ({ status: 'available' }),
+  });
   await once(router, 'listening');
-  const routerPort = router.address().port;
 
   try {
-    const response = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: 'Bearer main-account' },
-      body: JSON.stringify({ model: 'codexrouter/eduardo/gpt-5.6-sol', input: [] }),
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
     });
     assert.equal(response.status, 200);
     await response.text();
     assert.equal(seen.url, '/responses');
-    assert.equal(seen.body.model, 'gpt-5.6-sol');
+    assert.equal(seen.body.model, 'gpt-5.5');
     assert.equal(seen.headers['chatgpt-account-id'], 'acct-eduardo');
     assert.notEqual(seen.headers.authorization, 'Bearer main-account');
   } finally {
     await new Promise(resolve => router.close(resolve));
     await new Promise(resolve => upstream.close(resolve));
-    if (previous === undefined) delete process.env.CODEXROUTER_HOME; else process.env.CODEXROUTER_HOME = previous;
-    fs.rmSync(root, { recursive: true, force: true });
+    state.restore();
+  }
+});
+
+test('gateway returns cooldown instead of rolling to another account', async () => {
+  const state = await fixture();
+  let upstreamCalls = 0;
+  const upstream = http.createServer((_req, res) => {
+    upstreamCalls += 1;
+    res.writeHead(200);
+    res.end('unexpected');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const resetAt = Math.floor(Date.now() / 1000) + 900;
+
+  const router = startRouter({
+    port: 0,
+    upstreamBase: `http://127.0.0.1:${upstream.address().port}`,
+    usageReader: async () => ({ status: 'cooldown', cooldownUntil: resetAt }),
+  });
+  await once(router, 'listening');
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+    });
+    assert.equal(response.status, 429);
+    const payload = await response.json();
+    assert.equal(payload.error.cooldown_until, resetAt);
+    assert.equal(upstreamCalls, 0);
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+    state.restore();
   }
 });

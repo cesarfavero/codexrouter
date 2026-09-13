@@ -1,7 +1,7 @@
 {
   "name": "codexrouter",
-  "version": "0.2.0",
-  "description": "Desktop-first multi-account router for Codex using native ChatGPT login profiles and account-qualified model aliases.",
+  "version": "0.3.0",
+  "description": "Desktop-first single-model gateway for Codex with isolated ChatGPT accounts and usage telemetry.",
   "type": "module",
   "main": "desktop/electron/main.cjs",
   "bin": {
@@ -10,7 +10,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/cli.js && node --check src/router.js && node --check src/catalog.js && node --check src/auth.js && node --check desktop/electron/main.cjs && node --check desktop/electron/preload.cjs && node --check desktop/electron/autostart.cjs && node --check desktop/scripts/dev.cjs && node --check scripts/e2e-macos.mjs",
+    "check": "node --check src/cli.js && node --check src/router.js && node --check src/catalog.js && node --check src/auth.js && node --check src/usage.js && node --check desktop/electron/main.cjs && node --check desktop/electron/preload.cjs && node --check desktop/electron/autostart.cjs && node --check desktop/scripts/dev.cjs && node --check scripts/e2e-macos.mjs",
     "desktop:dev": "node desktop/scripts/dev.cjs",
     "desktop:typecheck": "tsc -p desktop/tsconfig.json --noEmit",
     "desktop:build": "vite build --config desktop/vite.config.ts",
@@ -62,21 +62,14 @@
       "category": "public.app-category.developer-tools",
       "minimumSystemVersion": "13.0",
       "hardenedRuntime": true,
-      "target": [
-        "dmg",
-        "zip"
-      ]
+      "target": ["dmg", "zip"]
     },
     "win": {
-      "target": [
-        "nsis"
-      ]
+      "target": ["nsis"]
     },
     "linux": {
       "category": "Development",
-      "target": [
-        "AppImage"
-      ]
+      "target": ["AppImage"]
     },
     "nsis": {
       "oneClick": false,

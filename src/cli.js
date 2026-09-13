@@ -6,6 +6,7 @@ import { startRouter } from './router.js';
 import { loadRegistry, registerAccount, removeAccount, setDefaultAccount, updateAccount, getAccount } from './store.js';
 import { runDoctor } from './doctor.js';
 
+const VERSION = '0.3.0';
 const [command, subcommand, ...args] = process.argv.slice(2);
 
 main().catch(error => {
@@ -15,7 +16,7 @@ main().catch(error => {
 
 async function main() {
   if (!command || command === 'help' || command === '--help' || command === '-h') return help();
-  if (command === '--version' || command === 'version') return console.log('codexrouter 0.1.0');
+  if (command === '--version' || command === 'version') return console.log(`codexrouter ${VERSION}`);
 
   if (command === 'account') return accountCommand(subcommand, args);
   if (command === 'catalog') return catalogCommand(subcommand);
@@ -24,7 +25,6 @@ async function main() {
   if (command === 'start') return startCommand(args);
   if (command === 'status') return statusCommand();
   if (command === 'doctor') return doctorCommand();
-
   throw new Error(`Unknown command: ${command}`);
 }
 
@@ -38,6 +38,7 @@ function accountCommand(action, args) {
       console.log(`Opening the official Codex login flow for “${account.label}”…`);
       const auth = login(account.codexHome);
       updateAccount(account.id, { email: auth.email, plan: auth.plan });
+      syncCatalog(loadRegistry());
       console.log(`Added ${account.label}${auth.email ? ` <${auth.email}>` : ''}${auth.plan ? ` · ${auth.plan}` : ''}`);
     } catch (error) {
       removeAccount(account.id, { removeProfile: false });
@@ -50,8 +51,9 @@ function accountCommand(action, args) {
     if (!registry.accounts.length) return console.log('No accounts configured.');
     for (const account of registry.accounts) {
       const marker = account.id === registry.defaultAccountId ? '*' : ' ';
-      console.log(`${marker} ${account.label} [${account.id}]${account.email ? ` · ${account.email}` : ''}${account.plan ? ` · ${account.plan}` : ''}`);
+      console.log(`${marker} ${account.label} [${account.id}]${account.email ? ` · ${account.email}` : ''}${account.plan ? ` · ${account.plan}` : ''}${account.preferredModel ? ` · ${account.preferredModel}` : ''}`);
     }
+    console.log('* active gateway account');
     return;
   }
   if (action === 'status') {
@@ -78,11 +80,12 @@ function accountCommand(action, args) {
     console.log(`Removed: ${removed.label}`);
     return;
   }
-  if (action === 'default') {
+  if (action === 'active' || action === 'default') {
     const name = args.join(' ').trim();
-    if (!name) throw new Error('Usage: codexrouter account default <name>');
+    if (!name) throw new Error('Usage: codexrouter account active <name>');
     const account = setDefaultAccount(name);
-    console.log(`Default account: ${account.label}`);
+    const result = syncCatalog(loadRegistry());
+    console.log(`Active gateway account: ${account.label} · ${result.nativeModel}`);
     return;
   }
   throw new Error(`Unknown account command: ${action}`);
@@ -90,25 +93,21 @@ function accountCommand(action, args) {
 
 function catalogCommand(action) {
   if (action !== 'sync') throw new Error('Usage: codexrouter catalog sync');
-  const registry = loadRegistry();
-  console.log('Refreshing each account through the official Codex model catalog…');
-  const result = syncCatalog(registry);
-  const models = Array.isArray(result.combined) ? result.combined : result.combined.models;
-  console.log(`Catalog written: ${result.path}`);
-  console.log(`${models.length} total model rows (${registry.accounts.length} accounts).`);
+  const result = syncCatalog(loadRegistry());
+  console.log(`Gateway catalog written: ${result.path}`);
+  console.log(`CodexRouter → ${result.activeAccount.label} → ${result.nativeModel}`);
 }
 
 function installCommand(args) {
   const portIndex = args.indexOf('--port');
   const port = portIndex >= 0 ? Number(args[portIndex + 1]) : 17842;
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid --port.');
-  const registry = loadRegistry();
-  const result = syncCatalog(registry);
+  const result = syncCatalog(loadRegistry());
   const journal = installIntegration({ port });
   console.log(`Catalog: ${result.path}`);
   console.log(`Codex config updated: ${journal.configPath}`);
   console.log(`Start the router with: codexrouter start --port ${port}`);
-  console.log('Restart Codex after the router is running.');
+  console.log('Restart Codex and select CodexRouter.');
 }
 
 function uninstallCommand() {
@@ -130,8 +129,9 @@ function startCommand(args) {
 function statusCommand() {
   const registry = loadRegistry();
   const integration = integrationStatus();
+  const active = registry.accounts.find(account => account.id === registry.defaultAccountId);
   console.log(`Accounts: ${registry.accounts.length}`);
-  console.log(`Default: ${registry.defaultAccountId || 'none'}`);
+  console.log(`Active: ${active?.label || 'none'}${active?.preferredModel ? ` · ${active.preferredModel}` : ''}`);
   console.log(`Integration: ${integration.installed ? 'installed' : 'not installed'}`);
   if (integration.journal?.port) console.log(`Port: ${integration.journal.port}`);
 }
@@ -143,5 +143,5 @@ function doctorCommand() {
 }
 
 function help() {
-  console.log(`CodexRouter 0.1.0\n\nUsage:\n  codexrouter account add <name>\n  codexrouter account list\n  codexrouter account status <name>\n  codexrouter account default <name>\n  codexrouter account logout <name>\n  codexrouter account remove <name> [--delete-profile]\n  codexrouter catalog sync\n  codexrouter install [--port 17842]\n  codexrouter start [--port 17842]\n  codexrouter status\n  codexrouter doctor\n  codexrouter uninstall\n\nAliases:\n  cxr ...\n`);
+  console.log(`CodexRouter ${VERSION}\n\nUsage:\n  codexrouter account add <name>\n  codexrouter account list\n  codexrouter account status <name>\n  codexrouter account active <name>\n  codexrouter account logout <name>\n  codexrouter account remove <name> [--delete-profile]\n  codexrouter catalog sync\n  codexrouter install [--port 17842]\n  codexrouter start [--port 17842]\n  codexrouter status\n  codexrouter doctor\n  codexrouter uninstall\n\nCompatibility:\n  account default <name> is an alias for account active <name>.\n\nAliases:\n  cxr ...\n`);
 }

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { codexBinary, fetchNativeCatalog, inspectAuth, loginStatus } from '../src/auth.js';
-import { aliasSlug, buildCombinedCatalog } from '../src/catalog.js';
+import { GATEWAY_SLUG, buildGatewayCatalog, chooseNativeModel, listVisibleNativeModels } from '../src/catalog.js';
 import { startRouter } from '../src/router.js';
 import { loadRegistry } from '../src/store.js';
 
@@ -17,55 +17,64 @@ if (process.platform !== 'darwin' && process.env.CODEXROUTER_E2E_ALLOW_NON_MAC !
   process.exit(2);
 }
 
-const registry = loadRegistry();
+const sourceRegistry = loadRegistry();
 const requested = process.argv.slice(2);
-const accounts = requested.length
+const selected = requested.length
   ? requested.map(name => {
       const needle = name.toLowerCase();
-      const account = registry.accounts.find(item => item.id.toLowerCase() === needle || item.label.toLowerCase() === needle);
+      const account = sourceRegistry.accounts.find(item => item.id.toLowerCase() === needle || item.label.toLowerCase() === needle);
       if (!account) throw new Error(`Unknown account: ${name}`);
       return account;
     })
-  : registry.accounts.slice(0, 2);
+  : sourceRegistry.accounts.slice(0, 2);
 
-if (accounts.length !== 2) {
-  throw new Error('The real E2E requires exactly two configured accounts. Pass two account labels/ids or configure at least two accounts in the desktop app.');
-}
-if (accounts[0].id === accounts[1].id) throw new Error('Choose two different accounts.');
+if (selected.length !== 2) throw new Error('The real E2E requires exactly two configured accounts.');
+if (selected[0].id === selected[1].id) throw new Error('Choose two different accounts.');
 
-const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'codexrouter-e2e-'));
-const temporaryCatalogPath = path.join(scratch, 'model-catalog.json');
-
-console.log(`CodexRouter real E2E: ${accounts[0].label} ↔ ${accounts[1].label}`);
-for (const account of accounts) {
+console.log(`CodexRouter gateway E2E: ${selected[0].label} ↔ ${selected[1].label}`);
+for (const account of selected) {
   const identity = inspectAuth(account.codexHome);
   const status = loginStatus(account.codexHome);
   console.log(`✓ ${account.label}: ${identity.email || 'authenticated'} · ${identity.plan || 'plan unknown'} · ${status}`);
 }
 
-const accountCatalogs = accounts.map(account => ({
-  account,
-  catalog: fetchNativeCatalog(account.codexHome),
+const accountCatalogs = selected.map(account => ({ account, catalog: fetchNativeCatalog(account.codexHome) }));
+const testAccounts = accountCatalogs.map(({ account, catalog }) => ({
+  ...account,
+  preferredModel: chooseNativeModel(catalog, account.preferredModel),
+  nativeModelCount: listVisibleNativeModels(catalog).length,
 }));
-const commonModel = selectCommonModel(accountCatalogs);
-if (!commonModel) throw new Error('The selected accounts do not expose a common list-visible Codex model.');
-const combinedCatalog = buildCombinedCatalog(accountCatalogs, accounts[0].id);
-fs.writeFileSync(temporaryCatalogPath, `${JSON.stringify(combinedCatalog, null, 2)}\n`, { mode: 0o600 });
-console.log(`✓ Common native model: ${commonModel}`);
+for (const account of testAccounts) {
+  if (!account.preferredModel) throw new Error(`${account.label} has no list-visible Codex model.`);
+  console.log(`✓ ${account.label} native model: ${account.preferredModel}`);
+}
+
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'codexrouter-e2e-'));
+const previousHome = process.env.CODEXROUTER_HOME;
+process.env.CODEXROUTER_HOME = scratch;
+const temporaryCatalogPath = path.join(scratch, 'model-catalog.json');
+const temporaryRegistryPath = path.join(scratch, 'accounts.json');
+const testCatalogs = accountCatalogs.map(({ catalog }, index) => ({ account: testAccounts[index], catalog }));
 
 const server = startRouter({ port: PORT });
 if (!server.listening) await once(server, 'listening');
-console.log(`✓ Test router: http://127.0.0.1:${PORT}/v1`);
+console.log(`✓ Test gateway: http://127.0.0.1:${PORT}/v1`);
 
 let failed = false;
 try {
-  for (const account of accounts) {
-    const alias = aliasSlug(account.id, commonModel);
+  for (const account of testAccounts) {
+    fs.writeFileSync(temporaryRegistryPath, `${JSON.stringify({
+      version: 1,
+      defaultAccountId: account.id,
+      accounts: testAccounts,
+    }, null, 2)}\n`, { mode: 0o600 });
+    const gatewayCatalog = buildGatewayCatalog(testCatalogs, account.id);
+    fs.writeFileSync(temporaryCatalogPath, `${JSON.stringify(gatewayCatalog, null, 2)}\n`, { mode: 0o600 });
+
     const outputFile = path.join(scratch, `${account.id}.txt`);
-    console.log(`→ ${alias}`);
+    console.log(`→ ${GATEWAY_SLUG} with active account ${account.label}`);
     const result = await runCodexExec({
-      accountHome: accounts[0].codexHome,
-      alias,
+      accountHome: account.codexHome,
       catalogFile: temporaryCatalogPath,
       outputFile,
     });
@@ -73,46 +82,28 @@ try {
       throw new Error(`Codex exec failed for ${account.label} (code ${result.code}).\n${tail(result.stderr || result.stdout)}`);
     }
     const answer = fs.readFileSync(outputFile, 'utf8').trim();
-    if (answer !== SUCCESS) {
-      throw new Error(`Unexpected response through ${account.label}: ${JSON.stringify(answer)}`);
-    }
-    console.log(`✓ Routed live request through ${account.label}`);
+    if (answer !== SUCCESS) throw new Error(`Unexpected response through ${account.label}: ${JSON.stringify(answer)}`);
+    console.log(`✓ Single gateway routed live request through explicitly active account ${account.label}`);
   }
 } catch (error) {
   failed = true;
   console.error(`✗ ${error.message}`);
 } finally {
   await new Promise(resolve => server.close(() => resolve()));
+  if (previousHome === undefined) delete process.env.CODEXROUTER_HOME;
+  else process.env.CODEXROUTER_HOME = previousHome;
   fs.rmSync(scratch, { recursive: true, force: true });
 }
 
 if (failed) process.exit(1);
-console.log('✓ E2E passed: both account-qualified model aliases completed real Codex requests.');
+console.log('✓ E2E passed: one gateway model routed through both accounts after explicit active-account selection.');
 
-function models(catalog) {
-  return Array.isArray(catalog) ? catalog : Array.isArray(catalog?.models) ? catalog.models : [];
-}
-
-function selectCommonModel(accountCatalogs) {
-  const lists = accountCatalogs.map(({ catalog }) => new Set(
-    models(catalog)
-      .filter(model => model && typeof model.slug === 'string' && (!model.visibility || model.visibility === 'list'))
-      .map(model => model.slug),
-  ));
-  if (!lists.length) return null;
-  const common = [...lists[0]].filter(slug => lists.every(set => set.has(slug)));
-  return common.find(slug => slug === 'gpt-5.6-sol')
-    || common.find(slug => slug.includes('gpt-5.6'))
-    || common[0]
-    || null;
-}
-
-function runCodexExec({ accountHome, alias, catalogFile, outputFile }) {
+function runCodexExec({ accountHome, catalogFile, outputFile }) {
   const args = [
     'exec',
     '--ephemeral',
     '--skip-git-repo-check',
-    '-m', alias,
+    '-m', GATEWAY_SLUG,
     '-c', `openai_base_url="http://127.0.0.1:${PORT}/v1"`,
     '-c', `model_catalog_json="${escapeToml(catalogFile)}"`,
     '--output-last-message', outputFile,

@@ -1,3 +1,28 @@
+export type UsageWindow = {
+  usedPercent: number | null;
+  remainingPercent: number | null;
+  windowSeconds: number | null;
+  resetAfterSeconds: number | null;
+  resetsAt: number | null;
+};
+
+export type AccountUsage = {
+  status: 'available' | 'cooldown' | 'unknown';
+  allowed: boolean | null;
+  limitReached: boolean;
+  cooldownUntil: number | null;
+  reachedType: string | null;
+  primary: UsageWindow | null;
+  secondary: UsageWindow | null;
+  spendControl: {
+    reached: boolean;
+    usedPercent: number | null;
+    remainingPercent: number | null;
+    resetsAt: number | null;
+  } | null;
+  checkedAt: string;
+};
+
 export type AccountSummary = {
   id: string;
   label: string;
@@ -6,7 +31,11 @@ export type AccountSummary = {
   connected: boolean;
   expiresAt: number | null;
   isDefault: boolean;
+  isActive: boolean;
+  preferredModel: string | null;
   modelCount: number;
+  usage: AccountUsage | null;
+  usageError: string | null;
   createdAt: string;
 };
 
@@ -35,6 +64,7 @@ export type Snapshot = {
   runtime: { running: boolean; port: number };
   autostart: { supported: boolean; enabled: boolean; development?: boolean };
   codex: { available: boolean; version: string | null };
+  gateway: { slug: string; displayName: string; activeAccountId: string | null };
   dataPath: string;
   catalogPath: string;
   logs: LogRecord[];
