@@ -87,11 +87,11 @@ CodexRouter passively reads the same ChatGPT/Codex usage surface used by Codex f
 
 Usage reads are cached locally for a short period. Authentication material is not sent to a CodexRouter-owned remote service.
 
-When the backend reports that the active account has reached its usage limit, CodexRouter marks it as **Cooldown**, blocks new gateway jobs for that account, and shows the reset time when available.
+When the backend reports that the active account has reached its usage limit, or its remaining usage reaches the configured low-usage threshold, CodexRouter automatically selects another healthy configured account and continues the gateway request.
 
-### No automatic quota rollover
+### Automatic quota rollover
 
-CodexRouter does **not** automatically jump to another ChatGPT subscription because the current one exhausted its usage allowance. Account switching remains explicit in the desktop app. The gateway also does not combine separate subscriptions into one quota pool.
+CodexRouter automatically fails over only among the ChatGPT accounts explicitly configured by the user. The gateway does not combine separate subscriptions into one quota pool.
 
 ## Desktop app
 

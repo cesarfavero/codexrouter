@@ -81,13 +81,15 @@ test('gateway routes through the explicitly active account and its preferred nat
   }
 });
 
-test('gateway returns cooldown instead of rolling to another account', async () => {
+test('gateway automatically rolls over from a cooldown account', async () => {
   const state = await fixture();
   let upstreamCalls = 0;
+  let seenAccount = null;
   const upstream = http.createServer((_req, res) => {
     upstreamCalls += 1;
-    res.writeHead(200);
-    res.end('unexpected');
+    seenAccount = _req.headers['chatgpt-account-id'];
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end('data: [DONE]\n\n');
   });
   upstream.listen(0, '127.0.0.1');
   await once(upstream, 'listening');
@@ -96,7 +98,9 @@ test('gateway returns cooldown instead of rolling to another account', async () 
   const router = startRouter({
     port: 0,
     upstreamBase: `http://127.0.0.1:${upstream.address().port}`,
-    usageReader: async () => ({ status: 'cooldown', cooldownUntil: resetAt }),
+    usageReader: async account => account.id === 'eduardo'
+      ? { status: 'cooldown', cooldownUntil: resetAt }
+      : { status: 'available' },
   });
   await once(router, 'listening');
 
@@ -106,10 +110,46 @@ test('gateway returns cooldown instead of rolling to another account', async () 
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
     });
-    assert.equal(response.status, 429);
-    const payload = await response.json();
-    assert.equal(payload.error.cooldown_until, resetAt);
-    assert.equal(upstreamCalls, 0);
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(seenAccount, 'acct-cesar');
+    assert.equal(upstreamCalls, 1);
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+    state.restore();
+  }
+});
+
+test('gateway rolls over when the active account is nearly exhausted', async () => {
+  const state = await fixture();
+  let seenAccount = null;
+  const upstream = http.createServer((req, res) => {
+    seenAccount = req.headers['chatgpt-account-id'];
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end('data: [DONE]\n\n');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+
+  const router = startRouter({
+    port: 0,
+    upstreamBase: `http://127.0.0.1:${upstream.address().port}`,
+    usageReader: async account => account.id === 'eduardo'
+      ? { status: 'available', primary: { remainingPercent: 5 } }
+      : { status: 'available', primary: { remainingPercent: 80 } },
+  });
+  await once(router, 'listening');
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(seenAccount, 'acct-cesar');
   } finally {
     await new Promise(resolve => router.close(resolve));
     await new Promise(resolve => upstream.close(resolve));

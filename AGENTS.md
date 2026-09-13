@@ -7,14 +7,13 @@ CodexRouter presents one managed `CodexRouter` model in the native Codex picker.
 ## Routing rules
 
 - The gateway slug is `codexrouter/gateway`.
-- Account selection must be explicit in the CodexRouter desktop app; `defaultAccountId` is retained as the persisted active-account field for backwards compatibility.
-- A quota-exhausted account may be marked `Cooldown` and blocked until its reset state changes.
-- Do not automatically switch to another subscription because the active account hit a Usage Limit.
+- `defaultAccountId` remains the persisted active-account field for backwards compatibility; the gateway may update it when automatic account failover selects another account.
+- The gateway may automatically select another healthy account when the active account is exhausted or near its usage limit.
 - Do not aggregate multiple subscriptions into a single effective quota pool.
 
 ## Non-goals
 
-- Do not implement automatic quota evasion or silent account rotation.
+- Automatic account failover is allowed only among accounts explicitly configured by the user in CodexRouter.
 - Do not add ChatGPT Web DOM automation, browser scraping, Playwright login or cookie import unless a future issue explicitly changes this direction.
 - Do not log access tokens, refresh tokens, cookies or raw auth.json contents.
 - Do not consume rate-limit reset credits from passive usage telemetry.

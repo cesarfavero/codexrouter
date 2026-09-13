@@ -3,7 +3,7 @@ import http from 'node:http';
 import { Readable } from 'node:stream';
 import { freshAuth } from './auth.js';
 import { GATEWAY_SLUG, isGatewaySlug } from './catalog.js';
-import { defaultAccount } from './store.js';
+import { allAccounts, defaultAccount, setDefaultAccount } from './store.js';
 import { catalogPath } from './paths.js';
 import { readJson } from './fs-util.js';
 import { getAccountUsage } from './usage.js';
@@ -12,6 +12,7 @@ const HOP_BY_HOP = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te',
   'trailer', 'transfer-encoding', 'upgrade', 'host', 'content-length',
 ]);
+const LOW_USAGE_REMAINING_PERCENT = Number(process.env.CODEXROUTER_LOW_USAGE_REMAINING_PERCENT || 10);
 
 export function startRouter({
   port = 17842,
@@ -42,7 +43,7 @@ export function startRouter({
 
       const raw = await readBody(req);
       let body = raw;
-      const account = defaultAccount();
+      let account = defaultAccount();
       const contentType = String(req.headers['content-type'] || '');
       let gatewayRequest = false;
 
@@ -50,13 +51,8 @@ export function startRouter({
         const parsed = JSON.parse(raw.toString('utf8'));
         gatewayRequest = isGatewaySlug(parsed?.model);
         if (gatewayRequest) {
-          if (!account.preferredModel) {
-            throw httpError(503, `The active account “${account.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);
-          }
-          const usage = await readUsageSafely(usageReader, account);
-          if (usage?.status === 'cooldown') {
-            throw cooldownError(account, usage);
-          }
+          account = await selectGatewayAccount(account, usageReader);
+          if (!account.preferredModel) throw httpError(503, `The active account “${account.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);
           parsed.model = account.preferredModel;
           body = Buffer.from(JSON.stringify(parsed));
         }
@@ -68,7 +64,13 @@ export function startRouter({
         upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: true });
       }
       if (gatewayRequest && upstream.status === 429) {
-        await readUsageSafely(usageReader, account, { force: true });
+        const fallback = await selectGatewayAccount(account, usageReader, { force: true, exclude: new Set([account.id]) });
+        if (fallback && fallback.id !== account.id) {
+          if (!fallback.preferredModel) throw httpError(503, `The fallback account “${fallback.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);
+          account = fallback;
+          body = Buffer.from(JSON.stringify({ ...JSON.parse(body.toString('utf8')), model: account.preferredModel }));
+          upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: false });
+        }
       }
       await writeResponse(res, upstream);
     } catch (error) {
@@ -106,6 +108,27 @@ async function readUsageSafely(usageReader, account, options = {}) {
   } catch {
     return null;
   }
+}
+
+async function selectGatewayAccount(active, usageReader, { force = false, exclude = new Set() } = {}) {
+  const accounts = allAccounts();
+  const candidates = [active, ...accounts.filter(account => account.id !== active.id)]
+    .filter((account, index, list) => !exclude.has(account.id) && list.findIndex(item => item.id === account.id) === index);
+  for (const account of candidates) {
+    const usage = await readUsageSafely(usageReader, account, { force });
+    if (usageIsHealthy(usage)) {
+      if (account.id !== active.id) setDefaultAccount(account.id);
+      return account;
+    }
+  }
+  throw cooldownError(active, await readUsageSafely(usageReader, active, { force }));
+}
+
+function usageIsHealthy(usage) {
+  if (!usage || usage.status === 'cooldown' || usage.allowed === false) return false;
+  const remaining = [usage.primary?.remainingPercent, usage.secondary?.remainingPercent, usage.spendControl?.remainingPercent]
+    .filter(value => Number.isFinite(value));
+  return !remaining.some(value => value <= LOW_USAGE_REMAINING_PERCENT);
 }
 
 function cooldownError(account, usage) {

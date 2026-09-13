@@ -92,3 +92,7 @@ export function defaultAccount() {
   if (!account) throw new Error('No accounts configured. Run: codexrouter account add <name>');
   return account;
 }
+
+export function allAccounts() {
+  return loadRegistry().accounts;
+}
