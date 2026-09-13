@@ -38,17 +38,17 @@ Open Codex
 select a Codex model
 ```
 
-Native Codex models remain visible in Codex. Models belonging to another connected account appear with a qualified CodexRouter slug and account label; account management and effort controls stay in the CodexRouter app.
+Native Codex models remain visible in Codex. Select **CodexRouter** when you want the managed gateway to choose the active healthy account and switch automatically when its usage is exhausted or nearly exhausted; account management and effort controls stay in the CodexRouter app.
 
 ## Gateway behavior
 
-The generated Codex catalog contains the managed gateway plus visible native models from connected accounts:
+The generated Codex catalog contains the managed gateway plus the visible native models from the active account:
 
 ```text
 slug: codexrouter/gateway
 display: CodexRouter
 gpt-5.5
-codexrouter/<account-id>/<native-model>
+gpt-5.6-sol
 ```
 
 For the active account, CodexRouter discovers the real list-visible models through the installed Codex CLI and selects a valid native model. A request then becomes:
@@ -147,7 +147,7 @@ CODEX_BIN=/path/to/codex npm run desktop:dev
 5. Add any other authorized accounts.
 6. Choose **Use for gateway** on the account you want active.
 7. Open **Setup** and click **Install & start**.
-8. Restart/open Codex and select the model you want. Use **CodexRouter** for the active account default or a qualified account model for a specific account.
+8. Restart/open Codex and select **CodexRouter** for automatic account switching, or choose a native Codex model directly.
 
 The integration manages only these top-level Codex settings:
 

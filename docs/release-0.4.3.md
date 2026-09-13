@@ -1,5 +1,5 @@
 # CodexRouter 0.4.3
 
-This patch release fixes account-qualified model routing. Selecting a model tied to a specific account now keeps that account pinned for the request, including when the upstream returns a rate-limit response; automatic failover remains available for the managed gateway and unqualified native models.
+This patch release fixes account routing and keeps the managed gateway as the single automatic-switch entry point. Selecting `CodexRouter` chooses a healthy configured account and switches automatically when usage is exhausted or nearly exhausted.
 
-The release also keeps the lower automatic model preference and the complete native/account-qualified Codex catalog introduced in 0.4.2.
+The release also keeps the lower automatic model preference and the complete native Codex catalog.

@@ -13,10 +13,6 @@ export function isGatewaySlug(value) {
   return value === GATEWAY_SLUG;
 }
 
-export function accountModelSlug(accountId, modelSlug) {
-  return `${ROUTER_PREFIX}${accountId}/${modelSlug}`;
-}
-
 export function parseAccountModelSlug(value) {
   if (typeof value !== 'string' || !value.startsWith(ROUTER_PREFIX) || isGatewaySlug(value)) return null;
   const [, accountId, ...modelParts] = value.split('/');
@@ -72,24 +68,18 @@ export function buildGatewayCatalog(accountCatalogs, activeAccountId) {
   const gateway = structuredClone(source);
   gateway.slug = GATEWAY_SLUG;
   gateway.display_name = GATEWAY_DISPLAY_NAME;
-  gateway.description = 'CodexRouter managed gateway. Native Codex models and account-specific models are available in the Codex picker.';
+  gateway.description = 'CodexRouter managed gateway. Select this model to use automatic account switching.';
   gateway.visibility = 'list';
   gateway.supported_in_api = true;
   gateway.is_default = true;
   gateway.upgrade = null;
   delete gateway.availability_nux;
   const models = [gateway];
-  for (const { account, catalog } of accountCatalogs) {
-    for (const sourceModel of listVisibleNativeModels(catalog)) {
+  for (const sourceModel of listVisibleNativeModels(activeEntry.catalog)) {
       const model = structuredClone(sourceModel);
-      if (account.id !== activeEntry.account.id) {
-        model.slug = accountModelSlug(account.id, sourceModel.slug);
-        model.display_name = `${sourceModel.display_name ?? sourceModel.name ?? sourceModel.slug} · ${account.label}`;
-      }
       model.visibility = 'list';
       model.supported_in_api = true;
       models.push(model);
-    }
   }
   return cloneCatalogWithModels(activeEntry.catalog, models.filter((model, index, list) => list.findIndex(item => item.slug === model.slug) === index));
 }
