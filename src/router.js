@@ -2,22 +2,28 @@
 import http from 'node:http';
 import { Readable } from 'node:stream';
 import { freshAuth } from './auth.js';
-import { parseAliasSlug } from './catalog.js';
-import { defaultAccount, loadRegistry } from './store.js';
+import { GATEWAY_SLUG, isGatewaySlug } from './catalog.js';
+import { defaultAccount } from './store.js';
 import { catalogPath } from './paths.js';
 import { readJson } from './fs-util.js';
+import { getAccountUsage } from './usage.js';
 
 const HOP_BY_HOP = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te',
   'trailer', 'transfer-encoding', 'upgrade', 'host', 'content-length',
 ]);
 
-export function startRouter({ port = 17842, host = '127.0.0.1', upstreamBase = process.env.CODEXROUTER_UPSTREAM_BASE || 'https://chatgpt.com/backend-api/codex' } = {}) {
+export function startRouter({
+  port = 17842,
+  host = '127.0.0.1',
+  upstreamBase = process.env.CODEXROUTER_UPSTREAM_BASE || 'https://chatgpt.com/backend-api/codex',
+  usageReader = getAccountUsage,
+} = {}) {
   const server = http.createServer(async (req, res) => {
     try {
       if (req.method === 'GET' && req.url === '/health') {
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, service: 'codexrouter' }));
+        res.end(JSON.stringify({ ok: true, service: 'codexrouter', model: GATEWAY_SLUG }));
         return;
       }
       if (req.method === 'GET' && (req.url === '/v1/models' || req.url?.startsWith('/v1/models?'))) {
@@ -36,17 +42,22 @@ export function startRouter({ port = 17842, host = '127.0.0.1', upstreamBase = p
 
       const raw = await readBody(req);
       let body = raw;
-      let account = defaultAccount();
+      const account = defaultAccount();
       const contentType = String(req.headers['content-type'] || '');
+      let gatewayRequest = false;
+
       if (raw.length && contentType.includes('application/json')) {
         const parsed = JSON.parse(raw.toString('utf8'));
-        const route = parseAliasSlug(parsed?.model);
-        if (route) {
-          const registry = loadRegistry();
-          const selected = registry.accounts.find(item => item.id === route.accountId);
-          if (!selected) throw new Error(`Model alias references missing account: ${route.accountId}`);
-          account = selected;
-          parsed.model = route.nativeModel;
+        gatewayRequest = isGatewaySlug(parsed?.model);
+        if (gatewayRequest) {
+          if (!account.preferredModel) {
+            throw httpError(503, `The active account “${account.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);
+          }
+          const usage = await readUsageSafely(usageReader, account);
+          if (usage?.status === 'cooldown') {
+            throw cooldownError(account, usage);
+          }
+          parsed.model = account.preferredModel;
           body = Buffer.from(JSON.stringify(parsed));
         }
       }
@@ -56,10 +67,20 @@ export function startRouter({ port = 17842, host = '127.0.0.1', upstreamBase = p
         await upstream.arrayBuffer();
         upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: true });
       }
+      if (gatewayRequest && upstream.status === 429) {
+        await readUsageSafely(usageReader, account, { force: true });
+      }
       await writeResponse(res, upstream);
     } catch (error) {
-      res.writeHead(500, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: { message: error?.message || String(error) } }));
+      const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        error: {
+          message: error?.message || String(error),
+          type: error?.type || (status === 429 ? 'usage_limit_reached' : 'codexrouter_error'),
+          cooldown_until: error?.cooldownUntil ?? null,
+        },
+      }));
     }
   });
   server.listen(port, host);
@@ -77,6 +98,31 @@ function routeEndpoint(method, url = '') {
     '/v1/images/edits': 'images/edits',
   };
   return map[path] || null;
+}
+
+async function readUsageSafely(usageReader, account, options = {}) {
+  try {
+    return await usageReader(account, options);
+  } catch {
+    return null;
+  }
+}
+
+function cooldownError(account, usage) {
+  const reset = usage.cooldownUntil
+    ? new Date(usage.cooldownUntil * 1000).toISOString()
+    : null;
+  const suffix = reset ? ` until ${reset}` : '';
+  const error = httpError(429, `The active account “${account.label}” is in cooldown${suffix}. Select another account explicitly in CodexRouter or wait for this account to reset.`);
+  error.type = 'usage_limit_reached';
+  error.cooldownUntil = usage.cooldownUntil ?? null;
+  return error;
+}
+
+function httpError(statusCode, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
 }
 
 async function forward({ req, body, account, endpoint, upstreamBase, forceRefresh }) {

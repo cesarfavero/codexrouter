@@ -1,21 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aliasSlug, parseAliasSlug, buildCombinedCatalog } from '../src/catalog.js';
+import { GATEWAY_SLUG, buildGatewayCatalog, chooseNativeModel } from '../src/catalog.js';
 
-test('alias slug encodes account and native model', () => {
-  const slug = aliasSlug('cesar', 'gpt-5.6-sol');
-  assert.equal(slug, 'codexrouter/cesar/gpt-5.6-sol');
-  assert.deepEqual(parseAliasSlug(slug), { accountId: 'cesar', nativeModel: 'gpt-5.6-sol' });
+test('gateway catalog exposes exactly one CodexRouter model', () => {
+  const cesar = {
+    models: [
+      { slug: 'gpt-5.6-sol', display_name: 'GPT-5.6 Sol', visibility: 'list', context_window: 100, is_default: true },
+      { slug: 'gpt-5.5', display_name: 'GPT-5.5', visibility: 'list', context_window: 80 },
+    ],
+  };
+  const eduardo = {
+    models: [{ slug: 'gpt-5.5', display_name: 'GPT-5.5', visibility: 'list', context_window: 80 }],
+  };
+
+  const result = buildGatewayCatalog([
+    { account: { id: 'cesar', label: 'Cesar', preferredModel: 'gpt-5.6-sol' }, catalog: cesar },
+    { account: { id: 'eduardo', label: 'Eduardo', preferredModel: 'gpt-5.5' }, catalog: eduardo },
+  ], 'cesar');
+
+  assert.equal(result.models.length, 1);
+  assert.equal(result.models[0].slug, GATEWAY_SLUG);
+  assert.equal(result.models[0].display_name, 'CodexRouter');
+  assert.equal(result.models[0].context_window, 100);
 });
 
-test('combined catalog appends account-specific model aliases', () => {
-  const source = { models: [{ slug: 'gpt-5.6-sol', display_name: 'GPT-5.6 Sol', visibility: 'list', context_window: 100 }] };
-  const result = buildCombinedCatalog([
-    { account: { id: 'cesar', label: 'Cesar' }, catalog: source },
-    { account: { id: 'eduardo', label: 'Eduardo' }, catalog: source },
-  ], 'cesar');
-  assert.equal(result.models.length, 3);
-  assert.equal(result.models[1].display_name, 'GPT-5.6 Sol · Cesar');
-  assert.equal(result.models[2].display_name, 'GPT-5.6 Sol · Eduardo');
-  assert.equal(result.models[2].slug, 'codexrouter/eduardo/gpt-5.6-sol');
+test('native model selection respects preference then catalog default', () => {
+  const source = {
+    models: [
+      { slug: 'gpt-default', visibility: 'list', is_default: true },
+      { slug: 'gpt-preferred', visibility: 'list' },
+    ],
+  };
+  assert.equal(chooseNativeModel(source, 'gpt-preferred'), 'gpt-preferred');
+  assert.equal(chooseNativeModel(source, 'missing'), 'gpt-default');
 });
