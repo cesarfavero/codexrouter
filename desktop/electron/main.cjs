@@ -7,6 +7,7 @@ const { pathToFileURL } = require('node:url');
 const { getAutostart, setAutostart } = require('./autostart.cjs');
 
 const DEFAULT_PORT = Number(process.env.CODEXROUTER_PORT || 17842);
+const VALID_EFFORTS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh']);
 const TRAY_ICON = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAkElEQVR4nO2XSw6AMAhEwXj/K+PKpLF8ay1pZLbWmQcYUYDS34WeQ0REwwGIaoZ68U2wF+RYEa75sQCzwzVfsQOr1M3Fqt56qKIep2UWCX6e9YwyfQQugEj10fv26EABFEABpAOMbsctXsXuZXRXM2MbtmLNvvogAegLSB8BCzC6/SxxvmIHZkNIfun/BaV0XTuOPDLd7faPAAAAAElFTkSuQmCC';
 
 let mainWindow = null;
@@ -94,6 +95,8 @@ async function snapshot() {
       isDefault: registry.defaultAccountId === account.id,
       isActive: registry.defaultAccountId === account.id,
       preferredModel: account.preferredModel ?? null,
+      preferredEffort: account.preferredEffort ?? null,
+      availableModels: account.availableModels ?? [],
       modelCount: account.nativeModelCount ?? 0,
       usage: usageSnapshot,
       usageError,
@@ -230,6 +233,21 @@ function registerIpc() {
     const account = store.setDefaultAccount(String(accountId));
     const result = await syncCatalogBestEffort();
     record('info', `Gateway active account set to ${account.label}${result?.nativeModel ? ` using ${result.nativeModel}` : ''}.`);
+    sendEvent({ type: 'snapshot-invalidated' });
+    return snapshot();
+  }));
+
+  ipcMain.handle('codexrouter:account:preferences', (_event, accountId, preferences) => withOperation('Save model preferences', async () => {
+    const { store } = await core();
+    const { account } = store.getAccount(String(accountId));
+    const model = preferences?.preferredModel == null ? account.preferredModel : String(preferences.preferredModel);
+    const effort = preferences?.preferredEffort == null ? null : String(preferences.preferredEffort);
+    if (effort && !VALID_EFFORTS.has(effort)) throw new Error(`Unsupported reasoning effort: ${effort}`);
+    if (model && account.availableModels?.length && !account.availableModels.some(item => item.slug === model)) {
+      throw new Error(`Model “${model}” is not available for ${account.label}. Refresh the gateway catalog first.`);
+    }
+    store.updateAccount(account.id, { preferredModel: model || null, preferredEffort: effort || null });
+    await syncCatalogBestEffort();
     sendEvent({ type: 'snapshot-invalidated' });
     return snapshot();
   }));

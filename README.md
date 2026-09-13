@@ -87,6 +87,8 @@ CodexRouter passively reads the same ChatGPT/Codex usage surface used by Codex f
 
 Usage reads are cached locally for a short period. Authentication material is not sent to a CodexRouter-owned remote service.
 
+In **Settings**, choose the native Codex model exposed by each synchronized account and its default reasoning effort (`minimal`, `low`, `medium`, `high` or `xhigh`). The configured effort is applied only when the request does not provide its own `reasoning.effort`.
+
 When the backend reports that the active account has reached its usage limit, or its remaining usage reaches the configured low-usage threshold, CodexRouter automatically selects another healthy configured account and continues the gateway request.
 
 ### Automatic quota rollover

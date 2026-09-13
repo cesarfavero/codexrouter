@@ -50,6 +50,7 @@ export function registerAccount(label, metadata = {}) {
     codexHome: accountHome(id),
     email: metadata.email ?? null,
     plan: metadata.plan ?? null,
+    preferredEffort: metadata.preferredEffort ?? null,
     createdAt: new Date().toISOString(),
   };
   registry.accounts.push(account);

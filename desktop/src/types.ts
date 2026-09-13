@@ -33,6 +33,8 @@ export type AccountSummary = {
   isDefault: boolean;
   isActive: boolean;
   preferredModel: string | null;
+  preferredEffort: string | null;
+  availableModels: Array<{ slug: string; name: string }>;
   modelCount: number;
   usage: AccountUsage | null;
   usageError: string | null;
@@ -84,6 +86,7 @@ export type CodexRouterDesktopApi = {
   reauthenticateAccount(accountId: string): Promise<Snapshot>;
   removeAccount(accountId: string): Promise<Snapshot>;
   setDefaultAccount(accountId: string): Promise<Snapshot>;
+  setAccountPreferences(accountId: string, preferences: { preferredModel?: string | null; preferredEffort?: string | null }): Promise<Snapshot>;
   syncCatalog(): Promise<Snapshot>;
   install(): Promise<Snapshot>;
   uninstall(): Promise<Snapshot>;

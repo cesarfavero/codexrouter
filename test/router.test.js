@@ -72,8 +72,43 @@ test('gateway routes through the explicitly active account and its preferred nat
     await response.text();
     assert.equal(seen.url, '/responses');
     assert.equal(seen.body.model, 'gpt-5.5');
+    assert.equal(seen.body.reasoning, undefined);
     assert.equal(seen.headers['chatgpt-account-id'], 'acct-eduardo');
     assert.notEqual(seen.headers.authorization, 'Bearer main-account');
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+    state.restore();
+  }
+});
+
+test('gateway applies the account effort without overriding request effort', async () => {
+  const state = await fixture();
+  let bodies = [];
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    bodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end('data: [DONE]\n\n');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const { readJson } = await import('../src/fs-util.js');
+  const { registryPath } = await import('../src/paths.js');
+  const registry = readJson(registryPath());
+  registry.accounts.find(account => account.id === 'eduardo').preferredEffort = 'high';
+  writeJsonAtomic(registryPath(), registry);
+  const router = startRouter({ port: 0, upstreamBase: `http://127.0.0.1:${upstream.address().port}`, usageReader: async () => ({ status: 'available' }) });
+  await once(router, 'listening');
+  try {
+    for (const input of [{ model: 'codexrouter/gateway', input: [] }, { model: 'codexrouter/gateway', input: [], reasoning: { effort: 'low' } }]) {
+      const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+      assert.equal(response.status, 200);
+      await response.text();
+    }
+    assert.equal(bodies[0].reasoning.effort, 'high');
+    assert.equal(bodies[1].reasoning.effort, 'low');
   } finally {
     await new Promise(resolve => router.close(resolve));
     await new Promise(resolve => upstream.close(resolve));

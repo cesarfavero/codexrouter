@@ -180,7 +180,7 @@ function AccountRow({ account, onActivate, onReauth, onRemove }: {
           {account.isActive ? <span className="soft-badge">Active</span> : null}
           {account.plan ? <span className="plan-badge">{formatPlan(account.plan)}</span> : null}
         </div>
-        <span>{account.email || 'Email becomes available after login'}{account.preferredModel ? ` · ${account.preferredModel}` : ''}</span>
+          <span>{account.email || 'Email becomes available after login'}{account.preferredModel ? ` · ${account.preferredModel}` : ''}{account.preferredEffort ? ` · ${account.preferredEffort} effort` : ''}</span>
       </div>
       <div className="account-models"><strong>{usageValue}</strong><span>{usageCaption}</span></div>
       <div className="account-status"><StatusDot tone={statusTone} /><span>{statusText}</span></div>
@@ -265,10 +265,40 @@ function ActivitySurface({ logs, snapshot }: { logs: LogRecord[]; snapshot: Snap
 }
 
 function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot; onRefresh: () => Promise<void>; setError: (message: string | null) => void }) {
+  const active = snapshot.accounts.find(account => account.isActive) ?? null;
+  const [model, setModel] = useState(active?.preferredModel ?? '');
+  const [effort, setEffort] = useState(active?.preferredEffort ?? 'medium');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setModel(active?.preferredModel ?? '');
+    setEffort(active?.preferredEffort ?? 'medium');
+  }, [active?.id, active?.preferredModel, active?.preferredEffort]);
+
+  const savePreferences = async () => {
+    if (!active || saving) return;
+    setSaving(true);
+    try { await api!.setAccountPreferences(active.id, { preferredModel: model || null, preferredEffort: effort || null }); await onRefresh(); }
+    catch (cause) { setError(messageOf(cause)); }
+    finally { setSaving(false); }
+  };
+
   return (
     <>
-      <SurfaceHeader eyebrow="Settings" title="Desktop behavior" body="CodexRouter stays in the menu bar so the gateway can remain available without keeping a window open." />
+      <SurfaceHeader eyebrow="Settings" title="Models and desktop behavior" body="Choose the native Codex model and default reasoning effort used by the active gateway account." />
       <div className="settings-list">
+        <SettingRow title="Default native model" description={active ? `Model used behind CodexRouter for ${active.label}. Refresh the gateway catalog to discover new models.` : 'Connect an account first.'}>
+          <select aria-label="Default native model" disabled={!active || !active.availableModels.length || saving} onChange={event => setModel(event.target.value)} value={model}>
+            {!active?.availableModels.length ? <option value="">Refresh catalog first</option> : null}
+            {active?.availableModels.map(item => <option key={item.slug} value={item.slug}>{item.name} · {item.slug}</option>)}
+          </select>
+        </SettingRow>
+        <SettingRow title="Default reasoning effort" description="Applied only when a request does not already specify reasoning.effort.">
+          <select aria-label="Default reasoning effort" disabled={!active || saving} onChange={event => setEffort(event.target.value)} value={effort}>
+            {['minimal', 'low', 'medium', 'high', 'xhigh'].map(value => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </SettingRow>
+        <div className="settings-save"><PrimaryButton disabled={!active || saving || (model === (active?.preferredModel ?? '') && effort === (active?.preferredEffort ?? 'medium'))} onClick={() => void savePreferences()}> {saving ? 'Saving…' : 'Save model defaults'}</PrimaryButton></div>
         <SettingRow title="Launch at login" description={snapshot.autostart.supported ? 'Start CodexRouter hidden when you sign in to macOS.' : 'Available in the packaged desktop app.'}>
           <Toggle checked={snapshot.autostart.enabled} disabled={!snapshot.autostart.supported} onChange={async checked => { try { await api!.setAutostart(checked); await onRefresh(); } catch (cause) { setError(messageOf(cause)); } }} />
         </SettingRow>

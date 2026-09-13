@@ -53,6 +53,9 @@ export function startRouter({
         if (gatewayRequest) {
           account = await selectGatewayAccount(account, usageReader);
           if (!account.preferredModel) throw httpError(503, `The active account “${account.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);
+          if (account.preferredEffort) {
+            parsed.reasoning = { ...(parsed.reasoning || {}), effort: parsed.reasoning?.effort || account.preferredEffort };
+          }
           parsed.model = account.preferredModel;
           body = Buffer.from(JSON.stringify(parsed));
         }

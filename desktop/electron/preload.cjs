@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('codexRouter', {
   reauthenticateAccount: accountId => invoke('codexrouter:account:reauth', accountId),
   removeAccount: accountId => invoke('codexrouter:account:remove', accountId),
   setDefaultAccount: accountId => invoke('codexrouter:account:default', accountId),
+  setAccountPreferences: (accountId, preferences) => invoke('codexrouter:account:preferences', accountId, preferences),
   syncCatalog: () => invoke('codexrouter:catalog:sync'),
   install: () => invoke('codexrouter:integration:install'),
   uninstall: () => invoke('codexrouter:integration:uninstall'),

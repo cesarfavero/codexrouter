@@ -78,6 +78,11 @@ export function syncCatalog(registry) {
       account.nativeModelCount = visible.length;
       registryChanged = true;
     }
+    const availableModels = visible.map(model => ({ slug: model.slug, name: model.display_name ?? model.name ?? model.slug }));
+    if (JSON.stringify(account.availableModels ?? []) !== JSON.stringify(availableModels)) {
+      account.availableModels = availableModels;
+      registryChanged = true;
+    }
   }
   if (registryChanged) saveRegistry(registry);
 
