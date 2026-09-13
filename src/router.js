@@ -46,10 +46,12 @@ export function startRouter({
       let account = defaultAccount();
       const contentType = String(req.headers['content-type'] || '');
       let gatewayRequest = false;
+      let explicitAccountModel = false;
 
       if (raw.length && contentType.includes('application/json')) {
         const parsed = JSON.parse(raw.toString('utf8'));
         const qualified = parseAccountModelSlug(parsed?.model);
+        explicitAccountModel = Boolean(qualified);
         const requestedModel = parsed?.model;
         gatewayRequest = isGatewaySlug(requestedModel) || Boolean(qualified) || typeof requestedModel === 'string';
         if (gatewayRequest) {
@@ -76,7 +78,7 @@ export function startRouter({
         await upstream.arrayBuffer();
         upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: true });
       }
-      if (gatewayRequest && upstream.status === 429 && !parseAccountModelSlug(JSON.parse(body.toString('utf8')).model)) {
+      if (gatewayRequest && upstream.status === 429 && !explicitAccountModel) {
         const fallback = await selectGatewayAccount(account, usageReader, { force: true, exclude: new Set([account.id]) });
         if (fallback && fallback.id !== account.id) {
           if (!fallback.preferredModel) throw httpError(503, `The fallback account “${fallback.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);
