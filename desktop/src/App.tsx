@@ -266,6 +266,7 @@ function ActivitySurface({ logs, snapshot }: { logs: LogRecord[]; snapshot: Snap
 
 function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot; onRefresh: () => Promise<void>; setError: (message: string | null) => void }) {
   const active = snapshot.accounts.find(account => account.isActive) ?? null;
+  const availableModels = active?.availableModels ?? [];
   const [model, setModel] = useState(active?.preferredModel ?? '');
   const [effort, setEffort] = useState(active?.preferredEffort ?? 'medium');
   const [saving, setSaving] = useState(false);
@@ -288,9 +289,9 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
       <SurfaceHeader eyebrow="Settings" title="Models and desktop behavior" body="Choose the native Codex model and default reasoning effort used by the active gateway account." />
       <div className="settings-list">
         <SettingRow title="Default native model" description={active ? `Model used behind CodexRouter for ${active.label}. Refresh the gateway catalog to discover new models.` : 'Connect an account first.'}>
-          <select aria-label="Default native model" disabled={!active || !active.availableModels.length || saving} onChange={event => setModel(event.target.value)} value={model}>
-            {!active?.availableModels.length ? <option value="">Refresh catalog first</option> : null}
-            {active?.availableModels.map(item => <option key={item.slug} value={item.slug}>{item.name} · {item.slug}</option>)}
+          <select aria-label="Default native model" disabled={!active || !availableModels.length || saving} onChange={event => setModel(event.target.value)} value={model}>
+            {!availableModels.length ? <option value="">Refresh catalog first</option> : null}
+            {availableModels.map(item => <option key={item.slug} value={item.slug}>{item.name} · {item.slug}</option>)}
           </select>
         </SettingRow>
         <SettingRow title="Default reasoning effort" description="Applied only when a request does not already specify reasoning.effort.">
