@@ -17,7 +17,7 @@
     "desktop:build": "vite build --config desktop/vite.config.ts",
     "desktop:package": "npm run desktop:typecheck && npm run desktop:build && electron-builder --mac",
     "desktop:package:all": "npm run desktop:typecheck && npm run desktop:build && electron-builder -mwl",
-    "desktop:package:mac": "npm run desktop:typecheck && npm run desktop:build && electron-builder --mac",
+    "desktop:package:mac": "npm run desktop:typecheck && npm run desktop:build && electron-builder --mac --publish never",
     "e2e:mac": "node scripts/e2e-macos.mjs"
   },
   "dependencies": {
