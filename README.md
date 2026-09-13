@@ -1,8 +1,8 @@
 # CodexRouter
 
-**Multiple ChatGPT accounts inside the Codex model picker.**
+**Multiple ChatGPT accounts inside the native Codex model picker.**
 
-CodexRouter keeps Codex as the interface and turns each authenticated ChatGPT account into model aliases such as:
+CodexRouter turns authenticated ChatGPT accounts into explicit model aliases:
 
 ```text
 GPT-5.6 Sol · Cesar
@@ -11,182 +11,114 @@ GPT-5.6 Sol Pro · Cesar
 GPT-5.6 Sol Pro · Eduardo
 ```
 
-Selecting an alias identifies both the real Codex model and the ChatGPT account that should authenticate the request.
+Selecting an alias chooses both the real Codex model and the account used to authenticate that request.
 
-> Status: early functional MVP. Account login, isolated profiles, catalog generation, Codex config integration and the Responses routing bridge are implemented. This project is not affiliated with OpenAI.
+> Status: desktop-first early MVP. Multi-account auth profiles, model aliases, loopback routing, desktop launcher, menu-bar runtime and a real two-account macOS E2E harness are implemented. CodexRouter is not affiliated with OpenAI.
 
-## Why
+## The intended experience
 
-Codex currently has one active ChatGPT authentication context per normal `CODEX_HOME`. That works for one account, but is awkward when the same developer legitimately uses separate personal, company or client accounts.
-
-CodexRouter adds one small layer around Codex:
+Normal users should not need to manage CodexRouter from a terminal.
 
 ```text
-Codex App / CLI
-      │
-      │ model = codexrouter/eduardo/gpt-5.6-sol
-      ▼
-CodexRouter (127.0.0.1 only)
-      │
-      ├─ resolve alias → account Eduardo + gpt-5.6-sol
-      ├─ load Eduardo's isolated Codex auth profile
-      ├─ ask the official Codex CLI to refresh auth when needed
-      └─ forward the request to the official Codex backend
+Open CodexRouter
+      ↓
+Add Account
+      ↓
+official Codex / OpenAI browser login
+      ↓
+account appears in Accounts
+      ↓
+Install & start
+      ↓
+Open Codex
+      ↓
+choose GPT-5.6 Sol · Cesar / Eduardo / ...
 ```
 
-There is no ChatGPT Web browser automation in CodexRouter.
+The CLI remains available for recovery, automation and diagnostics.
+
+## Desktop launcher
+
+The launcher is an Electron + React control center with four primary surfaces:
+
+- **Accounts** — add, re-authenticate, remove and choose the default account;
+- **Setup** — sync model catalogs, install/uninstall the Codex integration and start/stop the router;
+- **Activity** — operational status and credential-safe logs;
+- **Settings** — launch-at-login, local endpoint/data information and upstream credits.
+
+Closing the window keeps the packaged app in the macOS menu bar. When integration is installed, the launcher restores the local router on startup. Packaged macOS builds can enable **Launch at Login** using the native login-item mechanism.
 
 ## Open-source ancestry
 
-This project intentionally uses [`miuuyy/codex-chatgpt-web`](https://github.com/miuuyy/codex-chatgpt-web) as a major architectural reference. That project demonstrated the cleanest part of this approach: keep the signed/native Codex UI, augment the model catalog, and route only the selected model traffic through a local bridge.
+[`miuuyy/codex-chatgpt-web`](https://github.com/miuuyy/codex-chatgpt-web) is a major architectural **and desktop UI/UX reference** for this project.
 
-It is MIT licensed. Its original license is preserved in [`LICENSES/codex-chatgpt-web-MIT.txt`](LICENSES/codex-chatgpt-web-MIT.txt), and detailed attribution is in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+We intentionally reuse/adapt its approach to:
 
-CodexRouter removes the upstream ChatGPT Web automation path and replaces account authentication with isolated profiles driven by the **official Codex login flow**.
+- keep the signed/native Codex UI and model picker;
+- append model rows instead of replacing Codex;
+- route selected traffic through a loopback bridge;
+- manage Codex config transactionally;
+- use a compact Electron control center with sidebar/status/setup surfaces;
+- manage desktop autostart/menu-bar lifecycle.
+
+Its original MIT license is preserved at [`LICENSES/codex-chatgpt-web-MIT.txt`](LICENSES/codex-chatgpt-web-MIT.txt). Detailed attribution, including the specific launcher files used as references, is in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+We do **not** claim authorship of the upstream UI or architecture we reused/adapted.
+
+CodexRouter removes the upstream ChatGPT Web automation path. There is no browser worker, DOM automation, Temporary Chat transport, Playwright login, cookie import or MCP browser harness in this product.
 
 ## Requirements
 
-- macOS, Linux or Windows with Node.js 20+
-- the `codex` CLI installed and available in `PATH`
-- ChatGPT accounts that you are authorized to use
+For development from source:
 
-You can override the binary with `CODEX_BIN=/path/to/codex`.
+- macOS 13+ recommended for the current desktop target;
+- Node.js 20+;
+- the `codex` CLI installed and available in `PATH`;
+- ChatGPT accounts you are authorized to use.
 
-## Install from source
+Override the Codex executable with `CODEX_BIN=/path/to/codex` when needed.
+
+## Run the desktop app from source
 
 ```bash
 git clone https://github.com/cesarfavero/codexrouter.git
 cd codexrouter
-npm install -g .
+npm install
+npm run desktop:dev
 ```
 
-This installs both `codexrouter` and the shorter `cxr` alias.
+The development command starts Vite and Electron together.
 
-## Login flow
-
-Add the first account:
+## Build a macOS app
 
 ```bash
-codexrouter account add Cesar
+npm install
+npm run desktop:package
 ```
 
-CodexRouter creates an isolated profile under:
+Artifacts are written under `release/` by electron-builder. The packaged build enables the native **Launch at Login** setting.
 
-```text
-~/.codexrouter/accounts/cesar/codex-home
-```
+## Add an account in the UI
 
-and starts:
+Open **Accounts** and choose **Add Account**.
 
-```text
-CODEX_HOME=~/.codexrouter/accounts/cesar/codex-home codex login
-```
+1. Enter a label such as `Cesar` or `Eduardo`.
+2. CodexRouter creates an isolated profile at:
 
-The browser/OAuth experience is therefore the normal Codex login flow. CodexRouter does not ask for your password and does not implement a parallel OAuth client.
+   ```text
+   ~/.codexrouter/accounts/<account-id>/codex-home
+   ```
 
-Add another account:
+3. The launcher starts the official `codex login` with that directory as `CODEX_HOME`.
+4. Codex owns the localhost callback server, OpenAI browser/OAuth flow, token exchange and persisted auth.
+5. The launcher observes the public sign-in URL emitted by Codex only so it can show an **Open sign-in page** button.
+6. After login completes, CodexRouter reads non-secret identity metadata for the UI and syncs that account's model catalog.
 
-```bash
-codexrouter account add Eduardo
-```
+CodexRouter never asks for your ChatGPT password and does not implement a parallel OAuth client.
 
-List them:
+## What gets injected into Codex
 
-```bash
-codexrouter account list
-```
-
-Example:
-
-```text
-* Cesar   [cesar]   · cesar@example.com · pro
-  Eduardo [eduardo] · eduardo@example.com · plus
-```
-
-The `*` account is the default used for ordinary, non-aliased native model rows.
-
-## Set the default account
-
-```bash
-codexrouter account default Eduardo
-```
-
-## Verify a login
-
-```bash
-codexrouter account status Cesar
-```
-
-This delegates to `codex login status` inside Cesar's isolated profile.
-
-## Sync the model catalog
-
-```bash
-codexrouter catalog sync
-```
-
-For every account, CodexRouter executes the official `codex debug models` inside that account's `CODEX_HOME`. This gives CodexRouter the actual catalog exposed to that account and also lets Codex own normal auth refresh behavior.
-
-The generated catalog is stored at:
-
-```text
-~/.codexrouter/model-catalog.json
-```
-
-CodexRouter preserves the native rows and appends account aliases.
-
-## Connect Codex
-
-```bash
-codexrouter install
-```
-
-This performs two managed top-level changes in the main Codex `config.toml`:
-
-```toml
-openai_base_url = "http://127.0.0.1:17842/v1"
-model_catalog_json = "/Users/you/.codexrouter/model-catalog.json"
-```
-
-Previous values are journaled so `codexrouter uninstall` can restore them. If either managed line is changed by somebody else after installation, uninstall fails closed instead of overwriting the newer value.
-
-Then start the router:
-
-```bash
-codexrouter start
-```
-
-Restart Codex. The model picker should now contain the account-specific aliases from the generated catalog.
-
-## Commands
-
-```text
-codexrouter account add <name>                 Add/login an account with official Codex OAuth
-codexrouter account list                       List configured accounts
-codexrouter account status <name>              Validate one account through Codex
-codexrouter account default <name>             Choose fallback/default account
-codexrouter account logout <name>              Run Codex logout for one isolated profile
-codexrouter account remove <name>              Remove account from registry
-codexrouter account remove <name> --delete-profile
-                                                Also delete its isolated CODEX_HOME
-
-codexrouter catalog sync                       Refresh per-account catalogs and aliases
-codexrouter install [--port 17842]             Install managed Codex config integration
-codexrouter start [--port 17842]               Run the loopback Responses router
-codexrouter status                             Show local configuration state
-codexrouter doctor                             Check Codex, accounts, catalog and integration
-codexrouter uninstall                          Restore managed Codex config values
-```
-
-Short alias:
-
-```bash
-cxr account list
-cxr catalog sync
-cxr start
-```
-
-## Request routing
+For every account, CodexRouter runs the installed Codex CLI against that isolated profile and asks for its native model catalog. It preserves native model rows and appends account aliases.
 
 Alias slugs are deterministic:
 
@@ -200,46 +132,153 @@ Example:
 codexrouter/eduardo/gpt-5.6-sol
 ```
 
-For a Responses request using that slug, the router:
+The display name can be:
 
-1. resolves `eduardo` to the isolated account profile;
-2. changes the request model back to `gpt-5.6-sol`;
-3. reads the ChatGPT access token and account id from that profile;
-4. if the access token is near expiry, calls `codex debug models` in that profile so the installed Codex CLI owns the refresh behavior;
-5. replaces the request Authorization/account headers;
-6. streams the official backend response back to Codex.
+```text
+GPT-5.6 Sol · Eduardo
+```
 
-The bridge binds to `127.0.0.1`, not to a public interface.
+When Codex sends a request using that alias, the local router:
+
+1. resolves the account id and native model id;
+2. rewrites the model back to the native slug;
+3. loads the selected account's isolated Codex authentication;
+4. asks Codex itself to refresh authentication when necessary;
+5. replaces the request auth/account headers;
+6. streams the official Codex backend response back to the Codex client.
+
+The bridge binds to `127.0.0.1` only.
+
+## Setup screen
+
+The desktop setup flow guides four states:
+
+```text
+1. Connect accounts
+2. Build model aliases
+3. Install Codex integration
+4. Run in the background
+```
+
+**Install & start** synchronizes the catalog, manages the Codex configuration and starts the Router.
+
+The integration manages only these top-level Codex settings:
+
+```toml
+openai_base_url = "http://127.0.0.1:17842/v1"
+model_catalog_json = "/Users/you/.codexrouter/model-catalog.json"
+```
+
+Previous values are journaled. Uninstall restores them only when the managed lines still match what CodexRouter installed; otherwise it fails closed instead of overwriting a newer user change.
+
+## Menu bar
+
+The packaged desktop app exposes:
+
+```text
+Open CodexRouter
+Open Codex
+──────────────
+Router running · :17842
+Start/Stop Router
+Add Account…
+──────────────
+Launch at Login
+──────────────
+Quit CodexRouter
+```
+
+This makes the router a normal background developer utility rather than a terminal process you must remember to start manually.
+
+## Real two-account macOS E2E
+
+After adding at least two real accounts in the desktop app, run:
+
+```bash
+npm run e2e:mac -- Cesar Eduardo
+```
+
+Or, when exactly the first two configured accounts should be tested:
+
+```bash
+npm run e2e:mac
+```
+
+The harness:
+
+1. confirms both isolated profiles contain valid Codex authentication;
+2. asks both profiles for their real model catalogs;
+3. finds a common list-visible model;
+4. starts a temporary Router on `127.0.0.1:17942`;
+5. invokes a real `codex exec` against `codexrouter/<account>/<model>` for account A;
+6. repeats for account B;
+7. requires each live request to return exactly `CODEXROUTER_E2E_OK`;
+8. stops the temporary Router and removes scratch output.
+
+It does not copy auth files or permanently modify the main Codex config. This test consumes real model usage on both selected accounts.
+
+Override the E2E port with:
+
+```bash
+CODEXROUTER_E2E_PORT=17943 npm run e2e:mac -- Cesar Eduardo
+```
+
+## CLI fallback
+
+The CLI is still useful for recovery and headless operation:
+
+```text
+codexrouter account add <name>
+codexrouter account list
+codexrouter account status <name>
+codexrouter account default <name>
+codexrouter account logout <name>
+codexrouter account remove <name> --delete-profile
+
+codexrouter catalog sync
+codexrouter install [--port 17842]
+codexrouter start [--port 17842]
+codexrouter status
+codexrouter doctor
+codexrouter uninstall
+```
+
+Short alias: `cxr`.
 
 ## Security model
 
-- Each account gets its own `CODEX_HOME`.
-- Account profiles force `cli_auth_credentials_store = "file"` because the router needs to forward the current access token. The profile directories and auth files should remain owner-only.
-- CodexRouter never asks for ChatGPT passwords.
-- Refresh is delegated to the installed Codex CLI rather than duplicating OpenAI OAuth refresh logic.
-- No credential is intentionally written to logs or to the account registry.
-- The router listens on loopback only.
+- Every account has its own `CODEX_HOME`.
+- Account profiles force `cli_auth_credentials_store = "file"` because the router must forward the current access token for the selected account.
+- Those auth files are sensitive and must remain owner-only.
+- No password is collected by CodexRouter.
+- Sign-in, logout and token refresh are delegated to the installed Codex implementation.
+- Raw tokens/auth files are never sent to the renderer and are never intentionally written to CodexRouter logs.
+- Electron uses context isolation, a narrow preload IPC surface and no renderer Node integration.
+- External URLs are limited to HTTP(S).
+- The Router listens on loopback only.
+- Account selection is explicit through the chosen model alias; CodexRouter does not silently rotate accounts to aggregate or evade usage limits.
 
-This still means `~/.codexrouter/accounts/*/codex-home/auth.json` is sensitive authentication material. Do not sync or share that directory.
-
-## Current limitations
-
-- automatic background service/LaunchAgent packaging is not included yet; run `codexrouter start` before Codex;
-- Search/Image endpoints need broader real-world validation;
-- account-specific usage/limit telemetry is not yet shown in the UI;
-- a desktop account manager is not included yet;
-- Codex updates can change internal request/catalog contracts, so compatibility tests must track upstream Codex.
-
-The router does **not** attempt to combine accounts into one quota pool or automatically hop accounts when one hits a usage limit. Account selection is explicit through the model alias.
+Do not sync or share `~/.codexrouter/accounts/*/codex-home/auth.json`.
 
 ## Development
 
 ```bash
 npm test
 npm run check
+npm run desktop:typecheck
+npm run desktop:build
+npm run desktop:dev
 ```
 
-No runtime npm dependencies are required in the initial version.
+The repository keeps the core Router independent of Electron so routing/catalog tests can run without launching the desktop shell.
+
+## Current limitations
+
+- the desktop package still needs signing/notarization/release automation before a polished public macOS distribution;
+- the real two-account E2E must be run on a Mac that actually has two authorized ChatGPT accounts, so CI cannot complete that interactive credentialed portion;
+- Search/Image endpoints need broader real-world validation;
+- account-specific usage/remaining-limit telemetry is not exposed yet;
+- upstream Codex request/catalog contracts can change and need compatibility tracking.
 
 ## License
 
