@@ -30,8 +30,9 @@ async function core() {
       import(moduleUrl('src/integration.js')),
       import(moduleUrl('src/router.js')),
       import(moduleUrl('src/paths.js')),
-    ]).then(([store, auth, catalog, integration, router, paths]) => ({
-      store, auth, catalog, integration, router, paths,
+      import(moduleUrl('src/usage.js')),
+    ]).then(([store, auth, catalog, integration, router, paths, usage]) => ({
+      store, auth, catalog, integration, router, paths, usage,
     }));
   }
   return corePromise;
@@ -67,23 +68,22 @@ async function withOperation(name, work) {
   }
 }
 
-function safeCatalogModels(catalog) {
-  if (Array.isArray(catalog)) return catalog;
-  return Array.isArray(catalog?.models) ? catalog.models : [];
-}
-
 async function snapshot() {
-  const { store, auth, integration, paths } = await core();
+  const { store, auth, integration, paths, usage, catalog } = await core();
   const registry = store.loadRegistry();
-  let catalog = null;
-  try { catalog = JSON.parse(fs.readFileSync(paths.catalogPath(), 'utf8')); } catch {}
 
-  const accounts = registry.accounts.map(account => {
+  const accounts = await Promise.all(registry.accounts.map(async account => {
     let identity = null;
+    let usageSnapshot = null;
+    let usageError = null;
     try { identity = auth.inspectAuth(account.codexHome); } catch {}
-    const modelCount = safeCatalogModels(catalog).filter(model =>
-      typeof model?.slug === 'string' && model.slug.startsWith(`codexrouter/${account.id}/`)
-    ).length;
+    if (identity?.accessToken) {
+      try {
+        usageSnapshot = await usage.getAccountUsage(account);
+      } catch (error) {
+        usageError = error?.message || String(error);
+      }
+    }
     return {
       id: account.id,
       label: account.label,
@@ -92,10 +92,14 @@ async function snapshot() {
       connected: Boolean(identity?.accessToken),
       expiresAt: identity?.expiresAt ?? null,
       isDefault: registry.defaultAccountId === account.id,
-      modelCount,
+      isActive: registry.defaultAccountId === account.id,
+      preferredModel: account.preferredModel ?? null,
+      modelCount: account.nativeModelCount ?? 0,
+      usage: usageSnapshot,
+      usageError,
       createdAt: account.createdAt,
     };
-  });
+  }));
 
   const installed = integration.integrationStatus();
   const codexProbe = spawnSync(auth.codexBinary(), ['--version'], { encoding: 'utf8', timeout: 5000 });
@@ -111,6 +115,11 @@ async function snapshot() {
     codex: {
       available: !codexProbe.error && codexProbe.status === 0,
       version: codexProbe.status === 0 ? String(codexProbe.stdout || codexProbe.stderr || '').trim() : null,
+    },
+    gateway: {
+      slug: catalog.GATEWAY_SLUG,
+      displayName: catalog.GATEWAY_DISPLAY_NAME,
+      activeAccountId: registry.defaultAccountId,
     },
     dataPath: paths.homeDir(),
     catalogPath: paths.catalogPath(),
@@ -152,7 +161,7 @@ async function syncCatalogBestEffort() {
   if (!registry.accounts.length) return null;
   try {
     const result = catalog.syncCatalog(registry);
-    record('info', `Model catalog synchronized for ${result.accountCatalogs.length} account(s).`);
+    record('info', `Gateway catalog synchronized. Active account: ${result.activeAccount.label}; native model: ${result.nativeModel}.`);
     return result;
   } catch (error) {
     record('warning', `Catalog sync deferred: ${error.message}`);
@@ -167,13 +176,14 @@ function validateLabel(value) {
 }
 
 async function authenticateAccount(account, operationName) {
-  const { auth, store } = await core();
+  const { auth, store, usage } = await core();
   sendEvent({ type: 'login-state', accountId: account.id, state: 'starting' });
   const identity = await auth.loginInteractive(account.codexHome, {
     onAuthUrl: url => sendEvent({ type: 'login-url', accountId: account.id, url }),
     onState: state => sendEvent({ type: 'login-state', accountId: account.id, state }),
   });
   store.updateAccount(account.id, { email: identity.email, plan: identity.plan });
+  usage.invalidateAccountUsage(account.id);
   record('info', `${operationName} completed for ${account.label}.`);
   await syncCatalogBestEffort();
   sendEvent({ type: 'snapshot-invalidated' });
@@ -197,9 +207,10 @@ function registerIpc() {
   }));
 
   ipcMain.handle('codexrouter:account:remove', (_event, accountId) => withOperation('Remove account', async () => {
-    const { store, auth, integration, paths } = await core();
+    const { store, auth, integration, paths, usage } = await core();
     const { account } = store.getAccount(String(accountId));
     auth.logout(account.codexHome);
+    usage.invalidateAccountUsage(account.id);
     store.removeAccount(account.id, { removeProfile: true });
     record('info', `Removed ${account.label} and its isolated local Codex profile.`);
     const registry = store.loadRegistry();
@@ -214,18 +225,19 @@ function registerIpc() {
     return snapshot();
   }));
 
-  ipcMain.handle('codexrouter:account:default', (_event, accountId) => withOperation('Set default account', async () => {
+  ipcMain.handle('codexrouter:account:default', (_event, accountId) => withOperation('Set active account', async () => {
     const { store } = await core();
-    store.setDefaultAccount(String(accountId));
-    await syncCatalogBestEffort();
+    const account = store.setDefaultAccount(String(accountId));
+    const result = await syncCatalogBestEffort();
+    record('info', `Gateway active account set to ${account.label}${result?.nativeModel ? ` using ${result.nativeModel}` : ''}.`);
     sendEvent({ type: 'snapshot-invalidated' });
     return snapshot();
   }));
 
-  ipcMain.handle('codexrouter:catalog:sync', () => withOperation('Sync model catalog', async () => {
+  ipcMain.handle('codexrouter:catalog:sync', () => withOperation('Sync gateway catalog', async () => {
     const { store, catalog } = await core();
     const result = catalog.syncCatalog(store.loadRegistry());
-    record('info', `Model catalog synchronized for ${result.accountCatalogs.length} account(s).`);
+    record('info', `Gateway catalog synchronized. Active account: ${result.activeAccount.label}; native model: ${result.nativeModel}.`);
     sendEvent({ type: 'snapshot-invalidated' });
     return snapshot();
   }));
@@ -234,7 +246,7 @@ function registerIpc() {
     const { store, catalog, integration } = await core();
     catalog.syncCatalog(store.loadRegistry());
     const journal = integration.installIntegration({ port: DEFAULT_PORT });
-    record('info', 'Codex integration installed. Restart Codex to refresh the model picker.');
+    record('info', 'Codex integration installed. Restart Codex to refresh the single gateway model.');
     await startRuntime(journal.port);
     return snapshot();
   }));
