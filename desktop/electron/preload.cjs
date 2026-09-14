@@ -12,7 +12,7 @@ function onEvent(callback) {
 
 contextBridge.exposeInMainWorld('codexRouter', {
   snapshot: () => invoke('codexrouter:snapshot'),
-  addAccount: label => invoke('codexrouter:account:add', label),
+  addAccount: (label, authMode) => invoke('codexrouter:account:add', label, authMode),
   reauthenticateAccount: accountId => invoke('codexrouter:account:reauth', accountId),
   removeAccount: accountId => invoke('codexrouter:account:remove', accountId),
   setDefaultAccount: accountId => invoke('codexrouter:account:default', accountId),

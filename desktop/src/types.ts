@@ -83,7 +83,7 @@ export type LauncherEvent =
 
 export type CodexRouterDesktopApi = {
   snapshot(): Promise<Snapshot>;
-  addAccount(label: string): Promise<Snapshot>;
+  addAccount(label: string, authMode: 'local' | 'login'): Promise<Snapshot>;
   reauthenticateAccount(accountId: string): Promise<Snapshot>;
   removeAccount(accountId: string): Promise<Snapshot>;
   setDefaultAccount(accountId: string): Promise<Snapshot>;

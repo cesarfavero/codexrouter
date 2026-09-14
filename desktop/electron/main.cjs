@@ -210,6 +210,7 @@ async function authenticateAccount(account, operationName, { reuseMainSession = 
   if (reuseMainSession) {
     sendEvent({ type: 'login-state', accountId: account.id, state: 'reusing-session' });
     identity = auth.reuseMainCodexSession(account.codexHome);
+    if (!identity) throw new Error('No valid local Codex session was found in ~/.codex. Choose browser sign-in or log in to Codex first.');
   }
   if (!identity) {
     sendEvent({ type: 'login-state', accountId: account.id, state: 'starting' });
@@ -231,12 +232,12 @@ async function authenticateAccount(account, operationName, { reuseMainSession = 
 function registerIpc() {
   ipcMain.handle('codexrouter:snapshot', () => snapshot());
 
-  ipcMain.handle('codexrouter:account:add', (_event, rawLabel) => withOperation('Add account', async () => {
+  ipcMain.handle('codexrouter:account:add', (_event, rawLabel, rawAuthMode) => withOperation('Add account', async () => {
     const { store } = await core();
-    const hadAccounts = store.loadRegistry().accounts.length > 0;
+    const authMode = rawAuthMode === 'local' || rawAuthMode === 'login' ? rawAuthMode : 'login';
     const account = store.registerAccount(validateLabel(rawLabel));
     record('info', `Created isolated Codex profile for ${account.label}.`);
-    return authenticateAccount(account, 'Authentication', { reuseMainSession: !hadAccounts });
+    return authenticateAccount(account, 'Authentication', { reuseMainSession: authMode === 'local' });
   }));
 
   ipcMain.handle('codexrouter:account:reauth', (_event, accountId) => withOperation('Re-authenticate account', async () => {

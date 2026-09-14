@@ -323,13 +323,14 @@ function AddAccountModal({ login, onClose, onComplete, setError }: {
   setError: (message: string | null) => void;
 }) {
   const [label, setLabel] = useState('');
+  const [authMode, setAuthMode] = useState<'local' | 'login'>('local');
   const [busy, setBusy] = useState(false);
   const waiting = busy || Boolean(login?.state);
   const submit = async () => {
     if (!label.trim() || busy) return;
     setBusy(true);
     setError(null);
-    try { await api!.addAccount(label.trim()); await onComplete(); }
+    try { await api!.addAccount(label.trim(), authMode); await onComplete(); }
     catch (cause) { setError(messageOf(cause)); setBusy(false); }
   };
 
@@ -339,9 +340,17 @@ function AddAccountModal({ login, onClose, onComplete, setError }: {
         <div className="modal-kicker">Add ChatGPT account</div>
         {!waiting ? <>
           <h2>Name this account</h2>
-          <p>The label is only used inside CodexRouter to identify the account behind the single gateway model. Authentication is handled by the official Codex login flow.</p>
+          <p>Choose whether this profile uses the Codex session already on this Mac or a new official browser login.</p>
           <label className="field-label" htmlFor="account-label">Account label</label>
           <input autoFocus id="account-label" maxLength={80} onChange={event => setLabel(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void submit(); }} placeholder="Cesar" value={label} />
+          <div className="auth-choice-group" role="radiogroup" aria-label="Authentication method">
+            <button className={`auth-choice ${authMode === 'local' ? 'is-selected' : ''}`} onClick={() => setAuthMode('local')} role="radio" aria-checked={authMode === 'local'} type="button">
+              <strong>Use local Codex account</strong><span>Reuse the existing session from <code>~/.codex</code>.</span>
+            </button>
+            <button className={`auth-choice ${authMode === 'login' ? 'is-selected' : ''}`} onClick={() => setAuthMode('login')} role="radio" aria-checked={authMode === 'login'} type="button">
+              <strong>Sign in with browser</strong><span>Open the official OpenAI login flow.</span>
+            </button>
+          </div>
           <div className="modal-security"><Icon name="shield"/><span>No password, token or ChatGPT cookie is collected by CodexRouter.</span></div>
           <div className="modal-actions"><SecondaryButton onClick={onClose}>Cancel</SecondaryButton><PrimaryButton disabled={!label.trim()} onClick={() => void submit()}>Continue with Codex</PrimaryButton></div>
         </> : <>
