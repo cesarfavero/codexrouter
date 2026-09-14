@@ -116,8 +116,9 @@ export function startRouter({
       try { requestModel = JSON.parse(body.toString('utf8')).model ?? null; } catch {}
       routedAccount = account;
       routedModel = requestModel;
-      await emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http', durationMs: Date.now() - startedAt, attempts });
-      await writeResponse(res, upstream);
+      const usagePromise = await writeResponse(res, upstream);
+      await emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http', durationMs: Date.now() - startedAt, attempts, usage: null });
+      if (usagePromise) void usagePromise.then(usage => usage && emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http-usage', durationMs: Date.now() - startedAt, attempts, usage, usageOnly: true }));
     } catch (error) {
       const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
       await emitRequest(onRequest, { requestId, account: routedAccount, endpoint: req.url?.split('?')[0] || null, model: routedModel, status, transport: 'http', durationMs: Date.now() - startedAt, attempts, error: sanitizeLogText(error?.message || String(error)) });
@@ -293,8 +294,61 @@ async function writeResponse(res, upstream) {
     if (!HOP_BY_HOP.has(name.toLowerCase())) headers[name] = value;
   }
   res.writeHead(upstream.status, headers);
-  if (!upstream.body) return res.end();
+  if (!upstream.body) { res.end(); return null; }
+  let clientBody = upstream.body;
+  let inspectionBody = null;
+  if (typeof upstream.body.tee === 'function') [clientBody, inspectionBody] = upstream.body.tee();
+  const usagePromise = inspectionBody ? inspectUsage(inspectionBody) : Promise.resolve(null);
   await new Promise((resolve, reject) => {
-    Readable.fromWeb(upstream.body).on('error', reject).pipe(res).on('finish', resolve).on('error', reject);
+    Readable.fromWeb(clientBody).on('error', reject).pipe(res).on('finish', resolve).on('error', reject);
   });
+  return usagePromise;
+}
+
+async function inspectUsage(stream) {
+  try {
+    const decoder = new TextDecoder();
+    let pending = '';
+    let usage = null;
+    for await (const chunk of stream) {
+      pending += decoder.decode(chunk, { stream: true });
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() || '';
+      for (const line of lines) {
+        usage = parseUsageLine(line) || usage;
+      }
+    }
+    pending += decoder.decode();
+    usage = parseUsageLine(pending) || usage;
+    return usage;
+  } catch {
+    return null;
+  }
+}
+
+function parseUsageLine(line) {
+  if (!line.startsWith('data:')) return null;
+  try { return findUsage(JSON.parse(line.slice(5).trim())); } catch { return null; }
+}
+
+function findUsage(value, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 8) return null;
+  if (value.usage && typeof value.usage === 'object') return normalizeUsage(value.usage);
+  for (const child of Object.values(value)) {
+    const found = findUsage(child, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+function normalizeUsage(usage) {
+  const input = numberOrNull(usage.input_tokens);
+  const output = numberOrNull(usage.output_tokens);
+  const total = numberOrNull(usage.total_tokens);
+  return { inputTokens: input, outputTokens: output, totalTokens: total ?? ((input ?? 0) + (output ?? 0)) };
+}
+
+function numberOrNull(value) {
+  const number = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : Number.NaN;
+  return Number.isFinite(number) ? number : null;
 }

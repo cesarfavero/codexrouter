@@ -6,12 +6,13 @@ import { Icon, type IconName } from './icons';
 import type { AccountSummary, LauncherEvent, LogRecord, Operation, Snapshot } from './types';
 
 const api = window.codexRouter;
-type Surface = 'accounts' | 'setup' | 'activity' | 'settings';
+type Surface = 'overview' | 'accounts' | 'setup' | 'activity' | 'settings' | 'account-detail';
 const transition = { duration: 0.26, ease: [0.16, 1, 0.3, 1] } as const;
 
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [surface, setSurface] = useState<Surface>('accounts');
+  const [surface, setSurface] = useState<Surface>('overview');
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [operation, setOperation] = useState<Operation | null>(null);
   const [logs, setLogs] = useState<LogRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +57,7 @@ export function App() {
 
         <nav className="sidebar-nav" aria-label="CodexRouter">
           <NavGroup label="Workspace">
+            <NavItem active={surface === 'overview'} icon="activity" label="Overview" onClick={() => setSurface('overview')} />
             <NavItem active={surface === 'accounts'} icon="accounts" label="Gateway" onClick={() => setSurface('accounts')} badge={snapshot.accounts.length ? String(snapshot.accounts.length) : undefined} />
           </NavGroup>
           <NavGroup label="Configuration">
@@ -94,9 +96,11 @@ export function App() {
           {update ? <div className="update-banner"><span>CodexRouter {update.version} is available.</span><button onClick={() => void api.openExternal(update.url)} type="button">View release</button><button aria-label="Dismiss update" onClick={() => setUpdate(null)} type="button">×</button></div> : null}
           <AnimatePresence mode="wait">
             <motion.section animate={{ opacity: 1, y: 0 }} className="surface" exit={{ opacity: 0, y: -5 }} initial={{ opacity: 0, y: 7 }} key={surface} transition={transition}>
-              {surface === 'accounts' ? <AccountsSurface snapshot={snapshot} onAdd={() => setAddOpen(true)} onRefresh={refresh} setError={setError} setLogin={setLogin} /> : null}
+              {surface === 'overview' ? <OverviewSurface snapshot={snapshot} logs={logs} onOpenAccount={accountId => { setSelectedAccountId(accountId); setSurface('account-detail'); }} onOpenActivity={() => setSurface('activity')} /> : null}
+              {surface === 'accounts' ? <AccountsSurface snapshot={snapshot} onAdd={() => setAddOpen(true)} onRefresh={refresh} setError={setError} setLogin={setLogin} onOpenAccount={accountId => { setSelectedAccountId(accountId); setSurface('account-detail'); }} /> : null}
               {surface === 'setup' ? <SetupSurface snapshot={snapshot} onRefresh={refresh} setError={setError} /> : null}
               {surface === 'activity' ? <ActivitySurface logs={logs} snapshot={snapshot} /> : null}
+              {surface === 'account-detail' ? <AccountDetailSurface account={snapshot.accounts.find(item => item.id === selectedAccountId) ?? activeAccount} logs={logs} onBack={() => setSurface('overview')} /> : null}
               {surface === 'settings' ? <SettingsSurface snapshot={snapshot} onRefresh={refresh} setError={setError} /> : null}
             </motion.section>
           </AnimatePresence>
@@ -110,12 +114,13 @@ export function App() {
   );
 }
 
-function AccountsSurface({ snapshot, onAdd, onRefresh, setError, setLogin }: {
+function AccountsSurface({ snapshot, onAdd, onRefresh, setError, setLogin, onOpenAccount }: {
   snapshot: Snapshot;
   onAdd: () => void;
   onRefresh: () => Promise<void>;
   setError: (message: string | null) => void;
   setLogin: (value: { accountId?: string; state?: string; url?: string } | null) => void;
+  onOpenAccount: (accountId: string) => void;
 }) {
   return (
     <>
@@ -132,6 +137,7 @@ function AccountsSurface({ snapshot, onAdd, onRefresh, setError, setLogin }: {
             <AccountRow
               account={account}
               key={account.id}
+              onOpen={() => onOpenAccount(account.id)}
               onActivate={async () => {
                 try { await api!.setDefaultAccount(account.id); await onRefresh(); } catch (cause) { setError(messageOf(cause)); }
               }}
@@ -161,11 +167,12 @@ function AccountsSurface({ snapshot, onAdd, onRefresh, setError, setLogin }: {
   );
 }
 
-function AccountRow({ account, onActivate, onReauth, onRemove }: {
+function AccountRow({ account, onActivate, onReauth, onRemove, onOpen }: {
   account: AccountSummary;
   onActivate: () => void;
   onReauth: () => void;
   onRemove: () => void;
+  onOpen: () => void;
 }) {
   const cooldown = account.usage?.status === 'cooldown';
   const statusTone = !account.connected ? 'error' : cooldown ? 'warning' : 'success';
@@ -175,7 +182,7 @@ function AccountRow({ account, onActivate, onReauth, onRemove }: {
   const usageCaption = account.usageError ? 'usage unavailable' : cooldown ? 'until reset' : 'remaining';
 
   return (
-    <div className="account-row">
+    <div className="account-row" onClick={onOpen} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') onOpen(); }} role="button" tabIndex={0}>
       <div className="account-avatar">{initials(account.label)}</div>
       <div className="account-identity">
         <div className="account-title-line">
@@ -187,13 +194,73 @@ function AccountRow({ account, onActivate, onReauth, onRemove }: {
       </div>
       <div className="account-models"><strong>{usageValue}</strong><span>{usageCaption}</span></div>
       <div className="account-status"><StatusDot tone={statusTone} /><span>{statusText}</span></div>
-      <div className="account-actions">
+      <div className="account-actions" onClick={event => event.stopPropagation()}>
         {!account.isActive ? <IconButton icon="check" label="Use for gateway" onClick={onActivate} /> : null}
         <IconButton icon="refresh" label="Re-authenticate" onClick={onReauth} />
         <IconButton danger icon="trash" label="Remove" onClick={onRemove} />
       </div>
     </div>
   );
+}
+
+function OverviewSurface({ snapshot, logs, onOpenAccount, onOpenActivity }: { snapshot: Snapshot; logs: LogRecord[]; onOpenAccount: (accountId: string) => void; onOpenActivity: () => void }) {
+  const requests = uniqueRequestLogs(logs);
+  const successful = requests.filter(log => Number((log.details as { status?: number }).status) < 400).length;
+  const totalTokens = requests.reduce((sum, log) => sum + Number((log.details as { usage?: { totalTokens?: number } }).usage?.totalTokens || 0), 0);
+  const modelCounts = new Map<string, number>();
+  requests.forEach(log => { const model = String((log.details as { model?: string }).model || 'unknown'); modelCounts.set(model, (modelCounts.get(model) || 0) + 1); });
+  const topModels = [...modelCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  return (
+    <>
+      <SurfaceHeader eyebrow="Workspace" title="Router overview" body="A live view of account health, traffic and the models carrying your Codex work." actions={<SecondaryButton icon="activity" onClick={onOpenActivity}>View activity</SecondaryButton>} />
+      <div className="overview-hero"><div><span className="eyebrow">Today</span><strong>{snapshot.runtime.running ? 'Gateway is ready' : 'Gateway is stopped'}</strong><p>{snapshot.accounts.length} configured accounts · {successful} successful requests in this session</p></div><div className="hero-pulse"><StatusDot tone={snapshot.runtime.running ? 'success' : 'neutral'} /><span>{snapshot.runtime.running ? 'Routing live' : 'Waiting to start'}</span></div></div>
+      <div className="overview-metrics">
+        <Metric label="Requests" value={String(requests.length)} />
+        <Metric label="Success rate" value={requests.length ? `${Math.round(successful / requests.length * 100)}%` : '—'} />
+        <Metric label="Tokens reported" value={totalTokens ? formatNumber(totalTokens) : 'Awaiting data'} />
+        <Metric label="Accounts" value={String(snapshot.accounts.length)} />
+      </div>
+      <div className="overview-grid">
+        <div className="overview-panel account-health"><PanelHeading title="Account health" action={`${snapshot.accounts.length} connected`} />{snapshot.accounts.map((account, index) => <motion.button animate={{ opacity: 1, y: 0 }} className="health-row" initial={{ opacity: 0, y: 8 }} key={account.id} onClick={() => onOpenAccount(account.id)} transition={{ ...transition, delay: index * .04 }} type="button"><span className="mini-avatar">{initials(account.label)}</span><span className="health-name"><strong>{account.label}</strong><small>{account.preferredModel || 'No model selected'}</small></span><span className="health-bar"><i style={{ width: `${Math.max(0, Math.min(100, account.usage?.primary?.remainingPercent ?? 0))}%` }} /></span><strong className="health-percent">{account.usage?.primary?.remainingPercent == null ? '—' : `${Math.round(account.usage.primary.remainingPercent)}%`}</strong></motion.button>)}</div>
+        <div className="overview-panel model-rank"><PanelHeading title="Most used models" action="This session" />{topModels.length ? topModels.map(([model, count], index) => <div className="rank-row" key={model}><span className="rank-index">0{index + 1}</span><span>{model}</span><strong>{count}</strong><div className="rank-track"><i style={{ width: `${Math.max(12, count / topModels[0][1] * 100)}%` }} /></div></div>) : <EmptyInline title="No model traffic yet" body="Requests will appear here after the Router handles a Codex turn." />}</div>
+      </div>
+      <div className="overview-panel recent-panel"><PanelHeading title="Recent routing" action={<button className="text-action" onClick={onOpenActivity} type="button">Open full activity →</button>} />{requests.length ? requests.slice(-5).reverse().map(log => <div className="recent-row" key={log.id}><span className={`log-dot ${log.level}`} /><time>{new Date(log.at).toLocaleTimeString()}</time><strong>{String((log.details as { model?: string }).model || 'unknown')}</strong><span>{String((log.details as { account?: { label?: string } }).account?.label || 'Unassigned')}</span><em>{Number((log.details as { status?: number }).status) || '—'}</em></div>) : <EmptyInline title="No requests recorded" body="Start the gateway and send a request from Codex." />}</div>
+    </>
+  );
+}
+
+function AccountDetailSurface({ account, logs, onBack }: { account: AccountSummary | null; logs: LogRecord[]; onBack: () => void }) {
+  if (!account) return <EmptyInline title="Account not found" body="This account may have been removed." />;
+  const events = uniqueRequestLogs(logs).filter(log => String((log.details as { account?: { id?: string } })?.account?.id || '') === account.id);
+  const requestCount = events.length;
+  const tokens = events.reduce((sum, log) => sum + Number((log.details as { usage?: { totalTokens?: number } }).usage?.totalTokens || 0), 0);
+  const primary = account.usage?.primary?.remainingPercent;
+  const secondary = account.usage?.secondary?.remainingPercent;
+  const modelCounts = new Map<string, number>();
+  events.forEach(log => { const model = String((log.details as { model?: string }).model || 'unknown'); modelCounts.set(model, (modelCounts.get(model) || 0) + 1); });
+  const models = [...modelCounts.entries()].sort((a, b) => b[1] - a[1]);
+  return <>
+    <button className="back-link" onClick={onBack} type="button">← Overview</button>
+    <SurfaceHeader eyebrow="Account detail" title={account.label} body={`${account.email || 'Connected account'} · ${account.plan || 'Codex plan'} · ${account.preferredModel || 'No default model'}`} actions={<span className="detail-status"><StatusDot tone={account.connected ? 'success' : 'error'} />{account.connected ? 'Connected' : 'Needs login'}</span>} />
+    <div className="detail-metrics"><Metric label="Requests" value={String(requestCount)} /><Metric label="Tokens reported" value={tokens ? formatNumber(tokens) : 'Awaiting data'} /><Metric label="5-hour window" value={primary == null ? 'Unknown' : `${Math.round(primary)}% left`} /><Metric label="Weekly window" value={secondary == null ? 'Unknown' : `${Math.round(secondary)}% left`} /></div>
+    <div className="quota-panel"><PanelHeading title="Quota windows" action={`Checked ${account.usage?.checkedAt ? new Date(account.usage.checkedAt).toLocaleTimeString() : 'not yet'}`} /><QuotaLine label="5-hour limit" value={primary} /><QuotaLine label="Weekly limit" value={secondary} /><QuotaLine label="Spend control" value={account.usage?.spendControl?.remainingPercent ?? null} /></div>
+    <div className="detail-grid"><div className="overview-panel model-rank"><PanelHeading title="Models used" action="This session" />{models.length ? models.map(([model, count], index) => <div className="rank-row" key={model}><span className="rank-index">0{index + 1}</span><span>{model}</span><strong>{count}</strong><div className="rank-track"><i style={{ width: `${Math.max(12, count / models[0][1] * 100)}%` }} /></div></div>) : <EmptyInline title="No model traffic yet" body="Model distribution appears after this account handles requests." />}</div><div className="overview-panel recent-panel"><PanelHeading title="Requests handled" action={`${requestCount} total`} />{events.length ? events.slice(-12).reverse().map(log => <div className="recent-row" key={log.id}><span className={`log-dot ${log.level}`} /><time>{new Date(log.at).toLocaleTimeString()}</time><strong>{String((log.details as { model?: string }).model || 'unknown')}</strong><span>{String((log.details as { transport?: string }).transport || 'http')}</span><em>{Number((log.details as { status?: number }).status) || '—'}</em></div>) : <EmptyInline title="No requests for this account" body="The Router will show model and request details here." />}</div></div>
+  </>;
+}
+
+function PanelHeading({ title, action }: { title: string; action?: ReactNode }) { return <div className="panel-heading"><strong>{title}</strong>{typeof action === 'string' ? <span>{action}</span> : action}</div>; }
+function EmptyInline({ title, body }: { title: string; body: string }) { return <div className="empty-inline"><strong>{title}</strong><span>{body}</span></div>; }
+function QuotaLine({ label, value }: { label: string; value: number | null | undefined }) { const visible = value == null ? null : Math.max(0, Math.min(100, value)); return <div className="quota-line"><span>{label}</span><div className="quota-track"><i style={{ width: `${visible ?? 0}%` }} /></div><strong>{visible == null ? 'Unknown' : `${Math.round(visible)}% left`}</strong></div>; }
+function formatNumber(value: number) { return new Intl.NumberFormat(undefined, { notation: value > 99999 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value); }
+function uniqueRequestLogs(logs: LogRecord[]) {
+  const byRequest = new Map<string, LogRecord>();
+  for (const log of logs) {
+    const details = log.details as { requestId?: string } | undefined;
+    if (!details?.requestId) continue;
+    const current = byRequest.get(details.requestId);
+    if (!current || Boolean((details as { usageOnly?: boolean }).usageOnly)) byRequest.set(details.requestId, log);
+  }
+  return [...byRequest.values()];
 }
 
 function EmptyAccounts({ onAdd }: { onAdd: () => void }) {
@@ -251,16 +318,22 @@ function SetupStep({ index, done, title, body }: { index: number; done: boolean;
 
 function ActivitySurface({ logs, snapshot }: { logs: LogRecord[]; snapshot: Snapshot }) {
   const active = snapshot.accounts.find(account => account.isActive);
+  const requests = uniqueRequestLogs(logs);
+  const failures = requests.filter(log => Number((log.details as { status?: number }).status) >= 400).length;
+  const tokens = requests.reduce((sum, log) => sum + Number((log.details as { usage?: { totalTokens?: number } }).usage?.totalTokens || 0), 0);
   return (
     <>
       <SurfaceHeader eyebrow="Runtime" title="Activity" body={`See every Router request, account attempt, upstream status and sanitized error. Persistent log: ${snapshot.logPath}`} />
       <div className="metrics-row">
         <Metric label="Gateway" value={snapshot.runtime.running ? 'Running' : 'Stopped'} tone={snapshot.runtime.running ? 'success' : 'neutral'} />
+        <Metric label="Requests" value={String(requests.length)} />
+        <Metric label="Errors" value={String(failures)} tone={failures ? 'neutral' : 'success'} />
+        <Metric label="Tokens reported" value={tokens ? formatNumber(tokens) : 'Awaiting data'} />
         <Metric label="Active account" value={active?.label || 'None'} />
         <Metric label="Usage" value={active?.usage?.primary?.remainingPercent == null ? 'Unknown' : `${Math.round(active.usage.primary.remainingPercent)}% left`} />
       </div>
       <div className="log-view">
-        <div className="log-head"><span>Recent events</span><span>{logs.length}</span></div>
+        <div className="log-head"><span>Recent events</span><span>{logs.length} events · {requests.length} requests</span></div>
         {logs.length ? [...logs].reverse().map(log => <div className="log-row" key={log.id}><span className={`log-dot ${log.level}`} /><time>{new Date(log.at).toLocaleTimeString()}</time><span>{log.message}</span></div>) : <div className="log-empty">No runtime events yet.</div>}
       </div>
     </>

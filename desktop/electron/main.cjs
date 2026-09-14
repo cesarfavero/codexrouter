@@ -64,6 +64,11 @@ function record(level, message, details = null) {
 }
 
 function recordRouterRequest(event) {
+  if (event.usageOnly) {
+    const usage = event.usage || {};
+    record('info', `Usage ${event.requestId || 'unknown'} → ${event.account?.label || 'no account'} · ${event.model || event.endpoint} · ${usage.totalTokens ?? '—'} tokens (${usage.inputTokens ?? '—'} in / ${usage.outputTokens ?? '—'} out).`, { ...event, account: event.account ? { id: event.account.id, label: event.account.label } : null });
+    return;
+  }
   const account = event.account?.label || 'no account';
   const target = event.model || event.endpoint || 'unknown';
   const attempts = Array.isArray(event.attempts) ? event.attempts : [];
