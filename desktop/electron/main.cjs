@@ -215,12 +215,20 @@ function stopCodexRouterPortOwner(port) {
   return stopped;
 }
 
-async function stopRuntime() {
+async function stopRuntime({ restoreIntegration = true } = {}) {
   const server = routerServer;
-  if (!server) return snapshot();
-  routerServer = null;
-  await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-  record('info', 'Router stopped.');
+  if (server) {
+    routerServer = null;
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    record('info', 'Router stopped.');
+  }
+  if (restoreIntegration) {
+    const { integration } = await core();
+    if (integration.integrationStatus().installed) {
+      integration.uninstallIntegration();
+      record('info', 'Codex integration restored to the official endpoint.');
+    }
+  }
   sendEvent({ type: 'snapshot-invalidated' });
   return snapshot();
 }
@@ -351,7 +359,7 @@ function registerIpc() {
 
   ipcMain.handle('codexrouter:integration:uninstall', () => withOperation('Uninstall Codex integration', async () => {
     const { integration } = await core();
-    await stopRuntime();
+    await stopRuntime({ restoreIntegration: false });
     if (integration.integrationStatus().installed) integration.uninstallIntegration();
     record('info', 'Codex integration removed and previous config restored.');
     return snapshot();
@@ -360,7 +368,12 @@ function registerIpc() {
   ipcMain.handle('codexrouter:runtime:start', () => withOperation('Start router', async () => {
     const { integration } = await core();
     const status = integration.integrationStatus();
-    return startRuntime(status.journal?.port ?? DEFAULT_PORT);
+    const port = status.journal?.port ?? DEFAULT_PORT;
+    if (!status.installed) {
+      integration.installIntegration({ port });
+      record('info', 'Codex integration installed for the Router.');
+    }
+    return startRuntime(port);
   }));
 
   ipcMain.handle('codexrouter:runtime:stop', () => withOperation('Stop router', stopRuntime));
@@ -470,7 +483,13 @@ function refreshTray() {
       click: () => void withOperation(running ? 'Stop router' : 'Start router', async () => {
         if (running) return stopRuntime();
         const { integration } = await core();
-        return startRuntime(integration.integrationStatus().journal?.port ?? DEFAULT_PORT);
+        const status = integration.integrationStatus();
+        const port = status.journal?.port ?? DEFAULT_PORT;
+        if (!status.installed) {
+          integration.installIntegration({ port });
+          record('info', 'Codex integration installed for the Router.');
+        }
+        return startRuntime(port);
       }),
     },
     {
