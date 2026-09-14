@@ -166,9 +166,13 @@ async function proxyWebSocket({ req, socket, head, upstreamBase, usageReader, on
     routed = true;
     await onRequest?.({ account, endpoint, model: parsed.model ?? null, status: response.status, transport: 'websocket' });
     if (response.body) {
+      const decoder = new TextDecoder();
       for await (const chunk of response.body) {
-        if (!socket.destroyed) socket.write(encodeWebSocketFrame(Buffer.from(chunk), 0x1));
+        const text = decoder.decode(chunk, { stream: true });
+        if (!socket.destroyed && text) socket.write(encodeWebSocketFrame(Buffer.from(text), 0x1));
       }
+      const remainder = decoder.decode();
+      if (!socket.destroyed && remainder) socket.write(encodeWebSocketFrame(Buffer.from(remainder), 0x1));
     }
     if (!socket.destroyed) {
       const closePayload = Buffer.from([0x03, 0xE8]);

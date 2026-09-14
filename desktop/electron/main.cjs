@@ -367,7 +367,7 @@ function registerIpc() {
 
   ipcMain.handle('codexrouter:open-codex', async () => {
     const { auth } = await core();
-    const child = spawn(auth.codexBinary(), ['app'], { detached: true, stdio: 'ignore', env: process.env });
+    const child = spawn(auth.codexBinary(), ['app'], { detached: true, stdio: 'ignore', cwd: process.env.CODEXROUTER_PROJECT_DIR || app.getPath('home'), env: process.env });
     child.unref();
     record('info', 'Requested Codex Desktop launch.');
     return { ok: true };
@@ -515,7 +515,7 @@ function wireInternalEvents() {
   ipcMain.on('codexrouter:tray-open-codex', async () => {
     try {
       const { auth } = await core();
-      const child = spawn(auth.codexBinary(), ['app'], { detached: true, stdio: 'ignore', env: process.env });
+      const child = spawn(auth.codexBinary(), ['app'], { detached: true, stdio: 'ignore', cwd: process.env.CODEXROUTER_PROJECT_DIR || app.getPath('home'), env: process.env });
       child.unref();
     } catch (error) {
       record('error', `Open Codex: ${error.message}`);
