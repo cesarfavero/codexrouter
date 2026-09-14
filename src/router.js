@@ -1,6 +1,8 @@
 // Architecture adapted from miuuyy/codex-chatgpt-web (MIT). See THIRD_PARTY_NOTICES.md.
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
+import { brotliDecompressSync, gunzipSync, inflateSync, zstdDecompressSync } from 'node:zlib';
 import { freshAuth } from './auth.js';
 import { GATEWAY_SLUG, isGatewaySlug, parseAccountModelSlug } from './catalog.js';
 import { allAccounts, defaultAccount, setDefaultAccount } from './store.js';
@@ -13,6 +15,7 @@ const HOP_BY_HOP = new Set([
   'trailer', 'transfer-encoding', 'upgrade', 'host', 'content-length',
 ]);
 const LOW_USAGE_REMAINING_PERCENT = Number(process.env.CODEXROUTER_LOW_USAGE_REMAINING_PERCENT || 10);
+const MAX_DECODED_REQUEST_BYTES = 128 * 1024 * 1024;
 
 export function startRouter({
   port = 17842,
@@ -22,6 +25,11 @@ export function startRouter({
   onRequest = null,
 } = {}) {
   const server = http.createServer(async (req, res) => {
+    const requestId = crypto.randomUUID();
+    const startedAt = Date.now();
+    let routedAccount = null;
+    let routedModel = null;
+    const attempts = [];
     try {
       if (req.method === 'GET' && req.url === '/health') {
         res.writeHead(200, { 'content-type': 'application/json' });
@@ -35,6 +43,7 @@ export function startRouter({
         return;
       }
       if (req.method === 'GET' && req.url?.split('?')[0] === '/v1/responses') {
+        await emitRequest(onRequest, { requestId, account: null, endpoint: 'responses', model: null, status: 426, transport: 'capability-negotiation', method: 'GET', durationMs: Date.now() - startedAt, attempts: [] });
         res.writeHead(426, { 'content-type': 'text/plain; charset=utf-8' });
         res.end('Responses WebSocket transport is not enabled on this local route');
         return;
@@ -42,6 +51,7 @@ export function startRouter({
 
       const endpoint = routeEndpoint(req.method, req.url);
       if (!endpoint) {
+        await emitRequest(onRequest, { requestId, account: null, endpoint: req.url?.split('?')[0] || null, model: null, status: 404, transport: 'http', method: req.method || null, durationMs: Date.now() - startedAt, attempts: [] });
         res.writeHead(404, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: { message: 'CodexRouter endpoint not found.' } }));
         return;
@@ -49,13 +59,17 @@ export function startRouter({
 
       const raw = await readBody(req);
       let body = raw;
+      let decodedRequestBody = false;
       let account = defaultAccount();
+      routedAccount = account;
       const contentType = String(req.headers['content-type'] || '');
       let gatewayRequest = false;
       let explicitAccountModel = false;
 
       if (raw.length && contentType.includes('application/json')) {
-        const parsed = JSON.parse(raw.toString('utf8'));
+        body = decodeRequestBody(raw, req.headers['content-encoding']);
+        decodedRequestBody = body !== raw;
+        const parsed = JSON.parse(body.toString('utf8'));
         const qualified = parseAccountModelSlug(parsed?.model);
         explicitAccountModel = Boolean(qualified);
         const requestedModel = parsed?.model;
@@ -76,13 +90,17 @@ export function startRouter({
             parsed.reasoning = { ...(parsed.reasoning || {}), effort: parsed.reasoning?.effort || account.preferredEffort };
           }
           body = Buffer.from(JSON.stringify(parsed));
+          routedAccount = account;
+          routedModel = parsed.model ?? null;
         }
       }
 
-      let upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: false });
+      let upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: false, decodedRequestBody });
+      attempts.push(await describeAttempt(upstream, account, 'initial'));
       if (upstream.status === 401) {
         await upstream.arrayBuffer();
-        upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: true });
+        upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: true, decodedRequestBody });
+        attempts.push(await describeAttempt(upstream, account, 'auth-refresh'));
       }
       if (gatewayRequest && upstream.status === 429 && !explicitAccountModel) {
         const fallback = await selectGatewayAccount(account, usageReader, { force: true, exclude: new Set([account.id]) });
@@ -90,15 +108,19 @@ export function startRouter({
           if (!fallback.preferredModel) throw httpError(503, `The fallback account “${fallback.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);
           account = fallback;
           body = Buffer.from(JSON.stringify({ ...JSON.parse(body.toString('utf8')), model: account.preferredModel }));
-          upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: false });
+          upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: false, decodedRequestBody });
+          attempts.push(await describeAttempt(upstream, account, 'account-failover'));
         }
       }
       let requestModel = null;
       try { requestModel = JSON.parse(body.toString('utf8')).model ?? null; } catch {}
-      await onRequest?.({ account, endpoint, model: requestModel, status: upstream.status, transport: 'http' });
+      routedAccount = account;
+      routedModel = requestModel;
+      await emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http', durationMs: Date.now() - startedAt, attempts });
       await writeResponse(res, upstream);
     } catch (error) {
       const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+      await emitRequest(onRequest, { requestId, account: routedAccount, endpoint: req.url?.split('?')[0] || null, model: routedModel, status, transport: 'http', durationMs: Date.now() - startedAt, attempts, error: sanitizeLogText(error?.message || String(error)) });
       res.writeHead(status, { 'content-type': 'application/json' });
       res.end(JSON.stringify({
         error: {
@@ -110,14 +132,56 @@ export function startRouter({
     }
   });
   server.on('upgrade', (req, socket) => {
+    const requestId = crypto.randomUUID();
     if (req.url?.split('?')[0] !== '/v1/responses') {
+      void emitRequest(onRequest, { requestId, account: null, endpoint: req.url?.split('?')[0] || null, model: null, status: 404, transport: 'websocket-negotiation', method: 'GET', durationMs: 0, attempts: [] });
       socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
       return;
     }
+    void emitRequest(onRequest, { requestId, account: null, endpoint: 'responses', model: null, status: 426, transport: 'websocket-negotiation', method: 'GET', durationMs: 0, attempts: [] });
     socket.end('HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 0\r\n\r\n');
   });
   server.listen(port, host);
   return server;
+}
+
+async function emitRequest(onRequest, event) {
+  if (!onRequest) return;
+  try { await onRequest(event); } catch {}
+}
+
+function decodeRequestBody(raw, contentEncoding) {
+  const encoding = String(contentEncoding || 'identity').trim().toLowerCase();
+  let decoded;
+  if (!encoding || encoding === 'identity') return raw;
+  if (encoding === 'zstd') decoded = zstdDecompressSync(raw);
+  else if (encoding === 'gzip') decoded = gunzipSync(raw);
+  else if (encoding === 'deflate') decoded = inflateSync(raw);
+  else if (encoding === 'br') decoded = brotliDecompressSync(raw);
+  else throw httpError(415, `Unsupported Content-Encoding: ${encoding}`);
+  if (decoded.length > MAX_DECODED_REQUEST_BYTES) throw httpError(413, 'Decoded request body is too large.');
+  return decoded;
+}
+
+async function describeAttempt(response, account, reason) {
+  const headers = {};
+  for (const name of ['content-type', 'retry-after', 'x-oai-request-id', 'cf-ray', 'x-codex-active-limit', 'x-codex-plan-type']) {
+    const value = response.headers.get(name);
+    if (value) headers[name] = sanitizeLogText(value);
+  }
+  let error = null;
+  if (!response.ok) {
+    try { error = sanitizeLogText((await response.clone().text()).slice(0, 2000)); } catch {}
+  }
+  return { reason, accountId: account?.id ?? null, accountLabel: account?.label ?? null, status: response.status, headers, error };
+}
+
+function sanitizeLogText(value) {
+  return String(value || '')
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[REDACTED_JWT]')
+    .replace(/[\r\n]+/g, ' ')
+    .trim();
 }
 
 function routeEndpoint(method, url = '') {
@@ -179,11 +243,12 @@ function httpError(statusCode, message) {
   return error;
 }
 
-async function forward({ req, body, account, endpoint, upstreamBase, forceRefresh }) {
+async function forward({ req, body, account, endpoint, upstreamBase, forceRefresh, decodedRequestBody = false }) {
   const auth = freshAuth(account.codexHome, { force: forceRefresh });
   const headers = new Headers();
   for (const [name, value] of Object.entries(req.headers)) {
     if (value == null || HOP_BY_HOP.has(name.toLowerCase())) continue;
+    if (decodedRequestBody && name.toLowerCase() === 'content-encoding') continue;
     if (name.toLowerCase() === 'authorization' || name.toLowerCase() === 'chatgpt-account-id') continue;
     if (Array.isArray(value)) value.forEach(item => headers.append(name, item));
     else headers.set(name, String(value));

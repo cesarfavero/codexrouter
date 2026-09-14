@@ -46,6 +46,7 @@ export type LogRecord = {
   level: 'info' | 'warning' | 'error' | string;
   message: string;
   at: string;
+  details?: unknown;
 };
 
 export type Operation = {
@@ -69,6 +70,7 @@ export type Snapshot = {
   gateway: { slug: string; displayName: string; activeAccountId: string | null };
   dataPath: string;
   catalogPath: string;
+  logPath: string;
   logs: LogRecord[];
 };
 

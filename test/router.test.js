@@ -5,6 +5,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
+import { zstdCompressSync } from 'node:zlib';
 import { startRouter } from '../src/router.js';
 import { writeJsonAtomic } from '../src/fs-util.js';
 
@@ -52,6 +53,74 @@ test('responses capability negotiation falls back from WebSocket to HTTP/SSE', a
     assert.match(await response.text(), /Responses WebSocket transport is not enabled/);
   } finally {
     await new Promise(resolve => router.close(resolve));
+    state.restore();
+  }
+});
+
+test('router reports sanitized upstream failure details without consuming the client response', async () => {
+  const state = await fixture();
+  const events = [];
+  const upstream = http.createServer((_req, res) => {
+    res.writeHead(503, { 'content-type': 'application/json', 'x-oai-request-id': 'req-test' });
+    res.end(JSON.stringify({ error: { message: 'upstream failed with Bearer secret-token' } }));
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({
+    port: 0,
+    upstreamBase: `http://127.0.0.1:${upstream.address().port}`,
+    usageReader: async () => ({ status: 'available' }),
+    onRequest: event => events.push(event),
+  });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+    });
+    assert.equal(response.status, 503);
+    assert.match(await response.text(), /secret-token/);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].status, 503);
+    assert.equal(events[0].attempts[0].headers['x-oai-request-id'], 'req-test');
+    assert.match(events[0].attempts[0].error, /Bearer \[REDACTED\]/);
+    assert.doesNotMatch(events[0].attempts[0].error, /secret-token/);
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+    state.restore();
+  }
+});
+
+test('gateway decodes Codex zstd requests and forwards rewritten JSON without content-encoding', async () => {
+  const state = await fixture();
+  let seen = null;
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    seen = { headers: req.headers, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) };
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end('event: response.completed\ndata: {"type":"response.completed"}\n\n');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({ port: 0, upstreamBase: `http://127.0.0.1:${upstream.address().port}`, usageReader: async () => ({ status: 'available' }) });
+  await once(router, 'listening');
+  try {
+    const encoded = zstdCompressSync(Buffer.from(JSON.stringify({ model: 'codexrouter/gateway', input: [] })));
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-encoding': 'zstd' },
+      body: encoded,
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(seen.body.model, 'gpt-5.5');
+    assert.equal(seen.headers['content-encoding'], undefined);
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
     state.restore();
   }
 });

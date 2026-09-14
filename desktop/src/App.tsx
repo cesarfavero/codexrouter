@@ -253,7 +253,7 @@ function ActivitySurface({ logs, snapshot }: { logs: LogRecord[]; snapshot: Snap
   const active = snapshot.accounts.find(account => account.isActive);
   return (
     <>
-      <SurfaceHeader eyebrow="Runtime" title="Activity" body="See which account handled each Router request, the selected model, transport and status. Authentication tokens and raw auth files are never written to this log." />
+      <SurfaceHeader eyebrow="Runtime" title="Activity" body={`See every Router request, account attempt, upstream status and sanitized error. Persistent log: ${snapshot.logPath}`} />
       <div className="metrics-row">
         <Metric label="Gateway" value={snapshot.runtime.running ? 'Running' : 'Stopped'} tone={snapshot.runtime.running ? 'success' : 'neutral'} />
         <Metric label="Active account" value={active?.label || 'None'} />

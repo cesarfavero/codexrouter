@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage } = require('electron');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { once } = require('node:events');
@@ -10,6 +11,7 @@ const DEFAULT_PORT = Number(process.env.CODEXROUTER_PORT || 17842);
 const VALID_EFFORTS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh']);
 const TRAY_ICON = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAkElEQVR4nO2XSw6AMAhEwXj/K+PKpLF8ay1pZLbWmQcYUYDS34WeQ0REwwGIaoZ68U2wF+RYEa75sQCzwzVfsQOr1M3Fqt56qKIep2UWCX6e9YwyfQQugEj10fv26EABFEABpAOMbsctXsXuZXRXM2MbtmLNvvogAegLSB8BCzC6/SxxvmIHZkNIfun/BaV0XTuOPDLd7faPAAAAAElFTkSuQmCC';
 const UPDATE_CHECK_URL = 'https://api.github.com/repos/cesarfavero/codexrouter/releases/latest';
+const LOG_PATH = path.join(os.homedir(), '.codexrouter', 'logs', 'router.jsonl');
 
 let mainWindow = null;
 let tray = null;
@@ -18,7 +20,15 @@ let routerPort = DEFAULT_PORT;
 let isQuitting = false;
 let corePromise = null;
 let updateTimer = null;
-const logs = [];
+const logs = loadLogs();
+
+function loadLogs() {
+  try {
+    return fs.readFileSync(LOG_PATH, 'utf8').trim().split(/\r?\n/).slice(-250).map(line => JSON.parse(line));
+  } catch {
+    return [];
+  }
+}
 
 function moduleUrl(relative) {
   return pathToFileURL(path.join(__dirname, '..', '..', relative)).href;
@@ -41,12 +51,27 @@ async function core() {
   return corePromise;
 }
 
-function record(level, message) {
-  const item = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, level, message, at: new Date().toISOString() };
+function record(level, message, details = null) {
+  const item = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, level, message, at: new Date().toISOString(), ...(details ? { details } : {}) };
   logs.push(item);
   if (logs.length > 250) logs.splice(0, logs.length - 250);
+  try {
+    fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true, mode: 0o700 });
+    fs.appendFileSync(LOG_PATH, `${JSON.stringify(item)}\n`, { encoding: 'utf8', mode: 0o600 });
+  } catch {}
   sendEvent({ type: 'log', record: item });
   return item;
+}
+
+function recordRouterRequest(event) {
+  const account = event.account?.label || 'no account';
+  const target = event.model || event.endpoint || 'unknown';
+  const attempts = Array.isArray(event.attempts) ? event.attempts : [];
+  const failures = attempts.filter(attempt => attempt.error).map(attempt => `${attempt.reason}:${attempt.status} ${attempt.error}`).join(' | ');
+  const suffix = event.error || failures;
+  const message = `Request ${event.requestId || 'unknown'} via Router → ${account} · ${target} · ${event.status} · ${event.durationMs ?? 0}ms${suffix ? ` · ${suffix}` : ''}`;
+  const details = { ...event, account: event.account ? { id: event.account.id, label: event.account.label } : null };
+  record(event.status >= 500 || event.error ? 'error' : event.status >= 400 ? 'warning' : 'info', message, details);
 }
 
 function sendEvent(payload) {
@@ -152,6 +177,7 @@ async function snapshot() {
     },
     dataPath: paths.homeDir(),
     catalogPath: paths.catalogPath(),
+    logPath: LOG_PATH,
     logs: [...logs],
   };
 }
@@ -162,7 +188,7 @@ async function startRuntime(preferredPort) {
   routerPort = Number(preferredPort || DEFAULT_PORT);
   let server = router.startRouter({
     port: routerPort,
-    onRequest: event => record('info', `Request via Router → ${event.account.label} · ${event.model || event.endpoint} · ${event.status} (${event.transport}).`),
+    onRequest: recordRouterRequest,
   });
   try {
     await waitForServer(server);
@@ -175,7 +201,7 @@ async function startRuntime(preferredPort) {
     await new Promise(resolve => setTimeout(resolve, 150));
     server = router.startRouter({
       port: routerPort,
-      onRequest: event => record('info', `Request via Router → ${event.account.label} · ${event.model || event.endpoint} · ${event.status} (${event.transport}).`),
+      onRequest: recordRouterRequest,
     });
     await waitForServer(server);
   }
