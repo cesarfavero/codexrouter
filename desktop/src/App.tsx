@@ -125,7 +125,7 @@ function AccountsSurface({ snapshot, onAdd, onRefresh, setError, setLogin, onOpe
   return (
     <>
       <SurfaceHeader
-        eyebrow="Gateway"
+        eyebrow="Gateway" icon="accounts"
         title="One model in Codex. Accounts live here."
         body={`Codex shows the native models from your connected accounts. This app controls account routing, model defaults and effort.`}
         actions={<PrimaryButton icon="plus" onClick={onAdd}>Add Account</PrimaryButton>}
@@ -212,7 +212,7 @@ function OverviewSurface({ snapshot, logs, onOpenAccount, onOpenActivity }: { sn
   const topModels = [...modelCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
   return (
     <>
-      <SurfaceHeader eyebrow="Workspace" title="Router overview" body="A live view of account health, traffic and the models carrying your Codex work." actions={<SecondaryButton icon="activity" onClick={onOpenActivity}>View activity</SecondaryButton>} />
+      <SurfaceHeader eyebrow="Workspace" icon="activity" title="Router overview" body="A live view of account health, traffic and the models carrying your Codex work." actions={<SecondaryButton icon="activity" onClick={onOpenActivity}>View activity</SecondaryButton>} />
       <div className="overview-hero"><div><span className="eyebrow">Today</span><strong>{snapshot.runtime.running ? 'Gateway is ready' : 'Gateway is stopped'}</strong><p>{snapshot.accounts.length} configured accounts · {successful} successful requests in this session</p></div><div className="hero-pulse"><StatusDot tone={snapshot.runtime.running ? 'success' : 'neutral'} /><span>{snapshot.runtime.running ? 'Routing live' : 'Waiting to start'}</span></div></div>
       <div className="overview-metrics">
         <Metric label="Requests" value={String(requests.length)} />
@@ -286,7 +286,7 @@ function SetupSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot; o
 
   return (
     <>
-      <SurfaceHeader eyebrow="Setup" title="One-time setup" body="Connect accounts here once. Codex only needs the single CodexRouter model." />
+      <SurfaceHeader eyebrow="Setup" icon="setup" title="One-time setup" body="Connect accounts here once. Codex only needs the single CodexRouter model." />
       <div className="setup-list">{steps.map((step, index) => <SetupStep index={index + 1} key={step.title} {...step} />)}</div>
       <div className="setup-controls">
         <SecondaryButton icon="refresh" disabled={!snapshot.accounts.length} onClick={() => void doAndRefresh(() => api!.syncCatalog(), onRefresh, setError)}>Refresh gateway</SecondaryButton>
@@ -323,7 +323,7 @@ function ActivitySurface({ logs, snapshot }: { logs: LogRecord[]; snapshot: Snap
   const tokens = requests.reduce((sum, log) => sum + Number((log.details as { usage?: { totalTokens?: number } }).usage?.totalTokens || 0), 0);
   return (
     <>
-      <SurfaceHeader eyebrow="Runtime" title="Activity" body={`See every Router request, account attempt, upstream status and sanitized error. Persistent log: ${snapshot.logPath}`} />
+      <SurfaceHeader eyebrow="Runtime" icon="activity" title="Activity" body={`See every Router request, account attempt, upstream status and sanitized error. Persistent log: ${snapshot.logPath}`} />
       <div className="metrics-row">
         <Metric label="Gateway" value={snapshot.runtime.running ? 'Running' : 'Stopped'} tone={snapshot.runtime.running ? 'success' : 'neutral'} />
         <Metric label="Requests" value={String(requests.length)} />
@@ -362,7 +362,7 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
 
   return (
     <>
-      <SurfaceHeader eyebrow="Settings" title="Models and desktop behavior" body="Choose the native Codex model and default reasoning effort used by the active gateway account." />
+      <SurfaceHeader eyebrow="Settings" icon="settings" title="Models and desktop behavior" body="Choose the native Codex model and default reasoning effort used by the active gateway account." />
       <div className="settings-list">
         <SettingRow title="Default native model" description={active ? 'Model used behind CodexRouter for the active account. Refresh the gateway catalog to discover new models.' : 'Connect an account first.'}>
           <select aria-label="Default native model" disabled={!active || !availableModels.length || saving} onChange={event => setModel(event.target.value)} value={model}>
@@ -437,8 +437,8 @@ function AddAccountModal({ login, onClose, onComplete, setError }: {
   );
 }
 
-function SurfaceHeader({ eyebrow, title, body, actions }: { eyebrow: string; title: string; body: string; actions?: ReactNode }) {
-  return <header className="surface-header"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{body}</p></div>{actions ? <div className="surface-actions">{actions}</div> : null}</header>;
+function SurfaceHeader({ eyebrow, icon, title, body, actions }: { eyebrow: string; icon?: IconName; title: string; body: string; actions?: ReactNode }) {
+  return <header className="surface-header"><div><span className="eyebrow">{icon ? <Icon name={icon} /> : null}{eyebrow}</span><h1>{title}</h1><p>{body}</p></div>{actions ? <div className="surface-actions">{actions}</div> : null}</header>;
 }
 function NavGroup({ label, children }: { label: string; children: ReactNode }) { return <div className="nav-group"><span>{label}</span>{children}</div>; }
 function NavItem({ active, icon, label, onClick, badge, dot }: { active: boolean; icon: IconName; label: string; onClick: () => void; badge?: string; dot?: 'success' | 'attention' }) { return <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={onClick} type="button"><Icon name={icon}/><span>{label}</span>{badge ? <em>{badge}</em> : null}{dot ? <StatusDot tone={dot === 'success' ? 'success' : 'warning'} /> : null}</button>; }
@@ -447,7 +447,7 @@ function StatusDot({ tone }: { tone: 'success' | 'warning' | 'error' | 'neutral'
 function PrimaryButton({ children, icon, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon?: IconName }) { return <button className="button primary" type="button" {...props}>{icon ? <Icon name={icon}/> : null}<span>{children}</span></button>; }
 function SecondaryButton({ children, icon, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon?: IconName }) { return <button className="button secondary" type="button" {...props}>{icon ? <Icon name={icon}/> : null}<span>{children}</span></button>; }
 function IconButton({ icon, label, danger, onClick }: { icon: IconName; label: string; danger?: boolean; onClick: () => void }) { return <button aria-label={label} className={`icon-button ${danger ? 'danger' : ''}`} onClick={onClick} title={label} type="button"><Icon name={icon}/></button>; }
-function Metric({ label, value, tone }: { label: string; value: string; tone?: 'success' | 'neutral' }) { return <div className="metric"><span>{label}</span><strong className={tone === 'success' ? 'success-text' : ''}>{value}</strong></div>; }
+function Metric({ label, value, tone, icon }: { label: string; value: string; tone?: 'success' | 'neutral'; icon?: IconName }) { return <div className="metric"> <span>{icon ? <Icon name={icon} /> : null}{label}</span><strong className={tone === 'success' ? 'success-text' : ''}>{value}</strong></div>; }
 function SettingRow({ title, description, children }: { title: string; description: string; children: ReactNode }) { return <div className="setting-row"><div><strong>{title}</strong><p>{description}</p></div><div className="setting-value">{children}</div></div>; }
 function Toggle({ checked, disabled, label, onChange }: { checked: boolean; disabled?: boolean; label?: string; onChange: (checked: boolean) => void }) { return <button aria-label={label} aria-checked={checked} className={`toggle ${checked ? 'is-on' : ''}`} disabled={disabled} onClick={event => { event.stopPropagation(); onChange(!checked); }} role="switch" type="button"><span/></button>; }
 function OperationPill({ operation }: { operation: Operation }) { return <motion.div animate={{ opacity: 1, y: 0 }} className="operation-pill" exit={{ opacity: 0, y: 8 }} initial={{ opacity: 0, y: 8 }}><div className="spinner small"/><span>{operation.name}</span></motion.div>; }
