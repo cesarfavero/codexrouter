@@ -1,6 +1,6 @@
 import type { SVGProps } from 'react';
 
-export type IconName = 'accounts' | 'setup' | 'activity' | 'settings' | 'plus' | 'refresh' | 'play' | 'stop' | 'external' | 'trash' | 'check' | 'shield' | 'codex' | 'menu' | 'folder' | 'power';
+export type IconName = 'accounts' | 'setup' | 'activity' | 'settings' | 'plus' | 'refresh' | 'play' | 'stop' | 'external' | 'trash' | 'check' | 'shield' | 'codex' | 'brain' | 'menu' | 'folder' | 'power';
 
 export function Icon({ name, ...props }: SVGProps<SVGSVGElement> & { name: IconName }) {
   const common = { fill: 'none', stroke: 'currentColor', strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, strokeWidth: 1.8 };
@@ -17,7 +17,8 @@ export function Icon({ name, ...props }: SVGProps<SVGSVGElement> & { name: IconN
     trash: <><path d="M5 7h14M9 7V4h6v3M8 10v8M12 10v8M16 10v8M6 7l1 14h10l1-14"/></>,
     check: <path d="m5 12 4 4L19 6"/>,
     shield: <><path d="M12 3 5 6v5c0 4.8 2.8 8 7 10 4.2-2 7-5.2 7-10V6Z"/><path d="m9 12 2 2 4-4"/></>,
-    codex: <><rect x="4" y="4" width="16" height="16" rx="5"/><path d="m9 9 6 6M15 9l-6 6"/></>,
+    codex: <><path d="M9.5 4.2A3.2 3.2 0 0 0 6 7.3a3.2 3.2 0 0 0-1.2 5.8A3.2 3.2 0 0 0 8 18.8a3.2 3.2 0 0 0 4 1.2 3.2 3.2 0 0 0 4-1.2 3.2 3.2 0 0 0 3.2-5.7A3.2 3.2 0 0 0 18 7.3a3.2 3.2 0 0 0-3.5-3.1 3.2 3.2 0 0 0-5 0Z"/><path d="M12 4v16M7 9h2M15 9h2M7.5 14H10M14 14h2.5"/></>,
+    brain: <><path d="M9.5 4.2A3.2 3.2 0 0 0 6 7.3a3.2 3.2 0 0 0-1.2 5.8A3.2 3.2 0 0 0 8 18.8a3.2 3.2 0 0 0 4 1.2 3.2 3.2 0 0 0 4-1.2 3.2 3.2 0 0 0 3.2-5.7A3.2 3.2 0 0 0 18 7.3a3.2 3.2 0 0 0-3.5-3.1 3.2 3.2 0 0 0-5 0Z"/><path d="M12 4v16M7 9h2M15 9h2M7.5 14H10M14 14h2.5"/></>,
     menu: <><path d="M5 8h14M5 12h14M5 16h14"/></>,
     folder: <path d="M3 7h7l2 2h9v10H3Z"/>,
     power: <><path d="M12 3v9"/><path d="M7 5.8a8 8 0 1 0 10 0"/></>,

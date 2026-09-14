@@ -78,7 +78,7 @@ export function App() {
             </div>
           </div>
           <button className="sidebar-codex" onClick={() => void run(() => api.openCodex(), setError)} type="button">
-            <Icon name="codex" />Open Codex<Icon name="external" />
+            <Icon name="brain" />Open Codex<Icon name="external" />
           </button>
         </div>
       </aside>
@@ -93,7 +93,7 @@ export function App() {
         </header>
 
         <div className="content-scroll">
-          {update ? <div className="update-banner"><span>CodexRouter {update.version} is available.</span><button onClick={() => void api.openExternal(update.url)} type="button">View release</button><button aria-label="Dismiss update" onClick={() => setUpdate(null)} type="button">×</button></div> : null}
+          {update ? <div className="update-banner"><span>CodexRouter {update.version} is available.</span><button onClick={() => void api.openExternal(update.url)} type="button">View release</button><button aria-label="Hide update" onClick={() => setUpdate(null)} type="button">Hide</button></div> : null}
           <AnimatePresence mode="wait">
             <motion.section animate={{ opacity: 1, y: 0 }} className="surface" exit={{ opacity: 0, y: -5 }} initial={{ opacity: 0, y: 7 }} key={surface} transition={transition}>
               {surface === 'overview' ? <OverviewSurface snapshot={snapshot} logs={logs} onOpenAccount={accountId => { setSelectedAccountId(accountId); setSurface('account-detail'); }} onOpenActivity={() => setSurface('activity')} /> : null}
@@ -306,7 +306,7 @@ function SetupSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot; o
           <strong>{snapshot.integration.installed && snapshot.runtime.running ? 'Ready for Codex' : 'Finish setup to expose the gateway'}</strong>
           <p>{snapshot.integration.installed && snapshot.runtime.running ? `Open Codex and choose “${snapshot.gateway.displayName}”. Account and native model stay managed here.` : 'Your account profiles remain isolated before the global integration is installed.'}</p>
         </div>
-        <PrimaryButton icon="codex" disabled={!snapshot.integration.installed || !snapshot.runtime.running} onClick={() => void run(() => api!.openCodex(), setError)}>Open Codex</PrimaryButton>
+        <PrimaryButton icon="brain" disabled={!snapshot.integration.installed || !snapshot.runtime.running} onClick={() => void run(() => api!.openCodex(), setError)}>Open Codex</PrimaryButton>
       </div>
     </>
   );
