@@ -442,7 +442,7 @@ function SurfaceHeader({ eyebrow, title, body, actions }: { eyebrow: string; tit
 }
 function NavGroup({ label, children }: { label: string; children: ReactNode }) { return <div className="nav-group"><span>{label}</span>{children}</div>; }
 function NavItem({ active, icon, label, onClick, badge, dot }: { active: boolean; icon: IconName; label: string; onClick: () => void; badge?: string; dot?: 'success' | 'attention' }) { return <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={onClick} type="button"><Icon name={icon}/><span>{label}</span>{badge ? <em>{badge}</em> : null}{dot ? <StatusDot tone={dot === 'success' ? 'success' : 'warning'} /> : null}</button>; }
-function BrandMark() { return <div className="brand-mark"><span/><span/></div>; }
+function BrandMark() { return <div aria-hidden="true" className="brand-mark"><span /></div>; }
 function StatusDot({ tone }: { tone: 'success' | 'warning' | 'error' | 'neutral' }) { return <span className={`status-dot ${tone}`} />; }
 function PrimaryButton({ children, icon, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon?: IconName }) { return <button className="button primary" type="button" {...props}>{icon ? <Icon name={icon}/> : null}<span>{children}</span></button>; }
 function SecondaryButton({ children, icon, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon?: IconName }) { return <button className="button secondary" type="button" {...props}>{icon ? <Icon name={icon}/> : null}<span>{children}</span></button>; }

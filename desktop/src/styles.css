@@ -17,10 +17,8 @@ code { font-family: var(--font-mono); font-size: 12px; }
 .sidebar-brand > div:last-child { display: flex; flex-direction: column; min-width: 0; }
 .sidebar-brand strong { font-size: 13px; line-height: 1.25; }
 .sidebar-brand span { color: var(--color-text-tertiary); font-size: var(--text-xs); margin-top: 2px; }
-.brand-mark { position: relative; width: 26px; height: 26px; border: 1px solid var(--color-border-heavy); border-radius: 8px; background: rgb(255 255 255 / 4%); flex: 0 0 auto; }
-.brand-mark span { position: absolute; width: 11px; height: 2px; top: 11px; left: 7px; background: var(--color-icon-primary); border-radius: 2px; }
-.brand-mark span:first-child { transform: rotate(45deg); }
-.brand-mark span:last-child { transform: rotate(-45deg); }
+.brand-mark { position: relative; width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 50%; background: radial-gradient(circle at 32% 28%, #d8e2ff 0 10%, #7895ff 34%, #536ee8 70%, #3548a6 100%); box-shadow: 0 0 20px rgb(102 132 255 / 32%), inset 0 1px rgb(255 255 255 / 60%); flex: 0 0 auto; }
+.brand-mark span { width: 7px; height: 7px; border-radius: 50%; background: rgb(255 255 255 / 82%); box-shadow: 0 0 10px rgb(255 255 255 / 70%); }
 
 .sidebar-nav { flex: 1; min-height: 0; overflow: auto; }
 .nav-group { margin: 7px 0 16px; }
