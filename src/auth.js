@@ -4,7 +4,26 @@ import { spawn, spawnSync } from 'node:child_process';
 import { ensureDir, readJson, writeTextAtomic } from './fs-util.js';
 
 export function codexBinary() {
-  return process.env.CODEX_BIN || 'codex';
+  const configured = process.env.CODEX_BIN?.trim();
+  if (configured) return configured;
+
+  const candidates = [
+    ...(process.env.PATH || '').split(path.delimiter),
+    path.join(process.env.HOME || '', '.local', 'bin'),
+    path.join(process.env.HOME || '', '.volta', 'bin'),
+    path.join(process.env.HOME || '', '.asdf', 'shims'),
+    path.join(process.env.HOME || '', '.npm-global', 'bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+  ];
+  for (const directory of candidates) {
+    if (!directory) continue;
+    const binary = path.join(directory, 'codex');
+    try {
+      if (fs.existsSync(binary) && fs.statSync(binary).isFile() && (fs.statSync(binary).mode & 0o111)) return binary;
+    } catch {}
+  }
+  return 'codex';
 }
 
 export function prepareAccountCodexHome(codexHome) {
@@ -28,12 +47,19 @@ function runCodex(codexHome, args, options = {}) {
     encoding: options.capture ? 'utf8' : undefined,
     timeout: options.timeout ?? undefined,
   });
-  if (result.error) throw result.error;
+  if (result.error) throw normalizeCodexError(result.error);
   if (result.status !== 0) {
     const detail = options.capture ? (result.stderr || result.stdout || '').trim() : '';
     throw new Error(`codex ${args.join(' ')} exited with code ${result.status}${detail ? `: ${detail}` : ''}`);
   }
   return result;
+}
+
+function normalizeCodexError(error) {
+  if (error?.code === 'ENOENT') {
+    return new Error('Codex CLI not found. Install the official Codex CLI or set CODEX_BIN to its executable path, then try again.');
+  }
+  return error;
 }
 
 export function extractLoginAuthUrl(output) {
@@ -87,7 +113,7 @@ export function loginInteractive(codexHome, {
 
     child.stdout?.on('data', consume);
     child.stderr?.on('data', consume);
-    child.once('error', error => finish(() => reject(error)));
+    child.once('error', error => finish(() => reject(normalizeCodexError(error))));
     child.once('exit', (code, signal) => {
       if (code === 0) {
         finish(() => {
