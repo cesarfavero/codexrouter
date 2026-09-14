@@ -160,7 +160,10 @@ async function startRuntime(preferredPort) {
   if (routerServer?.listening) return snapshot();
   const { router } = await core();
   routerPort = Number(preferredPort || DEFAULT_PORT);
-  const server = router.startRouter({ port: routerPort });
+  const server = router.startRouter({
+    port: routerPort,
+    onRequest: event => record('info', `Request via Router → ${event.account.label} · ${event.model || event.endpoint} · ${event.status} (${event.transport}).`),
+  });
   routerServer = server;
   if (!server.listening) await once(server, 'listening');
   server.once('close', () => {

@@ -51,6 +51,8 @@ gpt-5.5
 gpt-5.6-sol
 ```
 
+The picker displays the native models with a short `Router ·` label, while keeping their native slugs for compatibility. The `Router` model is the automatic account-switching entry point.
+
 For the active account, CodexRouter discovers the real list-visible models through the installed Codex CLI and selects a valid native model. A request then becomes:
 
 ```text

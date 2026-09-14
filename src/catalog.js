@@ -6,7 +6,8 @@ import { saveRegistry } from './store.js';
 
 export const ROUTER_PREFIX = 'codexrouter/';
 export const GATEWAY_SLUG = 'codexrouter/gateway';
-export const GATEWAY_DISPLAY_NAME = 'CodexRouter';
+export const GATEWAY_DISPLAY_NAME = 'Router';
+export const ROUTER_MODEL_PREFIX = 'Router · ';
 const DEFAULT_MODEL_ORDER = ['gpt-5.5', 'gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'];
 
 export function isGatewaySlug(value) {
@@ -77,6 +78,7 @@ export function buildGatewayCatalog(accountCatalogs, activeAccountId) {
   const models = [gateway];
   for (const sourceModel of listVisibleNativeModels(activeEntry.catalog)) {
       const model = structuredClone(sourceModel);
+      model.display_name = `${ROUTER_MODEL_PREFIX}${sourceModel.display_name ?? sourceModel.name ?? sourceModel.slug}`;
       model.visibility = 'list';
       model.supported_in_api = true;
       models.push(model);

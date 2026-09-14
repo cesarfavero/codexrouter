@@ -20,9 +20,10 @@ test('gateway catalog exposes the gateway and active account native models', () 
 
   assert.equal(result.models.length, 3);
   assert.equal(result.models[0].slug, GATEWAY_SLUG);
-  assert.equal(result.models[0].display_name, 'CodexRouter');
+  assert.equal(result.models[0].display_name, 'Router');
   assert.equal(result.models[0].context_window, 100);
   assert.equal(result.models[1].slug, 'gpt-5.6-sol');
+  assert.equal(result.models[1].display_name, 'Router · GPT-5.6 Sol');
   assert.equal(result.models[2].slug, 'gpt-5.5');
   assert.equal(result.models.some(model => model.slug.startsWith('codexrouter/eduardo/')), false);
 });

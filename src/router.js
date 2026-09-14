@@ -1,5 +1,7 @@
 // Architecture adapted from miuuyy/codex-chatgpt-web (MIT). See THIRD_PARTY_NOTICES.md.
 import http from 'node:http';
+import https from 'node:https';
+import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { freshAuth } from './auth.js';
 import { GATEWAY_SLUG, isGatewaySlug, parseAccountModelSlug } from './catalog.js';
@@ -19,6 +21,7 @@ export function startRouter({
   host = '127.0.0.1',
   upstreamBase = process.env.CODEXROUTER_UPSTREAM_BASE || 'https://chatgpt.com/backend-api/codex',
   usageReader = getAccountUsage,
+  onRequest = null,
 } = {}) {
   const server = http.createServer(async (req, res) => {
     try {
@@ -87,6 +90,9 @@ export function startRouter({
           upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: false });
         }
       }
+      let requestModel = null;
+      try { requestModel = JSON.parse(body.toString('utf8')).model ?? null; } catch {}
+      await onRequest?.({ account, endpoint, model: requestModel, status: upstream.status, transport: 'http' });
       await writeResponse(res, upstream);
     } catch (error) {
       const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
@@ -100,8 +106,124 @@ export function startRouter({
       }));
     }
   });
+  server.on('upgrade', (req, socket, head) => {
+    void proxyWebSocket({ req, socket, head, upstreamBase, usageReader, onRequest });
+  });
   server.listen(port, host);
   return server;
+}
+
+async function proxyWebSocket({ req, socket, head, upstreamBase, usageReader, onRequest }) {
+  if (req.url?.split('?')[0] !== '/v1/responses' || req.headers.upgrade?.toLowerCase() !== 'websocket') {
+    socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+    return;
+  }
+  const key = req.headers['sec-websocket-key'];
+  if (!key) { socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'); return; }
+  const accept = crypto.createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+  socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+
+  let buffer = head?.length ? Buffer.from(head) : Buffer.alloc(0);
+  let upstreamSocket = null;
+  let routed = false;
+  let account = null;
+  let endpoint = 'responses';
+  const pending = [];
+  const close = () => { if (!socket.destroyed) socket.end(); if (upstreamSocket && !upstreamSocket.destroyed) upstreamSocket.end(); };
+  socket.on('error', close);
+  socket.on('close', close);
+
+  const routeAndConnect = async payload => {
+    const parsed = payload && typeof payload === 'object' ? payload : {};
+    const requestedModel = parsed.model;
+    const qualified = parseAccountModelSlug(requestedModel);
+    account = qualified ? allAccounts().find(candidate => candidate.id === qualified.accountId) : await selectGatewayAccount(defaultAccount(), usageReader);
+    if (!account) throw httpError(400, `Unknown CodexRouter account model: ${requestedModel}`);
+    if (qualified) {
+      const usage = await readUsageSafely(usageReader, account);
+      if (!usageIsHealthy(usage)) throw cooldownError(account, usage);
+      parsed.model = qualified.modelSlug;
+    } else {
+      if (!account.preferredModel) throw httpError(503, 'No native Codex model selected. Sync the gateway catalog first.');
+      parsed.model = isGatewaySlug(requestedModel) ? account.preferredModel : requestedModel;
+    }
+    if (account.preferredEffort) parsed.reasoning = { ...(parsed.reasoning || {}), effort: parsed.reasoning?.effort || account.preferredEffort };
+    const target = new URL(`${upstreamBase.replace(/\/$/, '')}/${endpoint}`);
+    const headers = {};
+    for (const [name, value] of Object.entries(req.headers)) {
+      if (value != null && !HOP_BY_HOP.has(name.toLowerCase()) && name.toLowerCase() !== 'authorization' && name.toLowerCase() !== 'chatgpt-account-id') headers[name] = value;
+    }
+    const auth = freshAuth(account.codexHome);
+    headers.authorization = `Bearer ${auth.accessToken}`;
+    if (auth.accountId) headers['chatgpt-account-id'] = auth.accountId;
+    headers.host = target.host;
+    const client = target.protocol === 'https:' ? https : http;
+    await new Promise((resolve, reject) => {
+      const request = client.request(target, { method: 'GET', headers });
+      request.once('upgrade', (_response, remoteSocket, remoteHead) => {
+        upstreamSocket = remoteSocket;
+        if (remoteHead.length) socket.write(remoteHead);
+        upstreamSocket.on('data', chunk => socket.write(chunk));
+        upstreamSocket.on('error', close);
+        upstreamSocket.on('close', close);
+        resolve();
+      });
+      request.once('response', response => { response.resume(); reject(new Error(`Codex upstream websocket upgrade failed with ${response.statusCode}.`)); });
+      request.once('error', reject);
+      request.end();
+    });
+    routed = true;
+    await onRequest?.({ account, endpoint, model: parsed.model ?? null, status: 101, transport: 'websocket' });
+    for (const frame of pending.splice(0)) upstreamSocket.write(encodeWebSocketFrame(frame.payload, frame.opcode));
+  };
+
+  const consume = async chunk => {
+    buffer = Buffer.concat([buffer, chunk]);
+    const frames = decodeWebSocketFrames(buffer);
+    buffer = frames.rest;
+    for (const frame of frames.frames) {
+      if (frame.opcode === 0x8) { close(); return; }
+      if (frame.opcode === 0x9) { socket.write(encodeWebSocketFrame(frame.payload, 0xA)); continue; }
+      if (routed) { upstreamSocket?.write(encodeWebSocketFrame(frame.payload, frame.opcode)); continue; }
+      pending.push(frame);
+      if (frame.opcode === 0x1) {
+        try { await routeAndConnect(JSON.parse(frame.payload.toString('utf8'))); }
+        catch (error) { socket.write(encodeWebSocketFrame(Buffer.from(JSON.stringify({ error: { message: error.message } })), 0x1)); close(); return; }
+      }
+    }
+  };
+  socket.on('data', chunk => void consume(chunk));
+  if (buffer.length) void consume(Buffer.alloc(0));
+}
+
+function decodeWebSocketFrames(input) {
+  const frames = [];
+  let offset = 0;
+  while (input.length - offset >= 2) {
+    const first = input[offset];
+    const second = input[offset + 1];
+    let length = second & 0x7f;
+    let cursor = offset + 2;
+    if (length === 126) { if (input.length - cursor < 2) break; length = input.readUInt16BE(cursor); cursor += 2; }
+    else if (length === 127) { if (input.length - cursor < 8) break; const value = input.readBigUInt64BE(cursor); if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('WebSocket frame is too large.'); length = Number(value); cursor += 8; }
+    const masked = (second & 0x80) !== 0;
+    if (masked) { if (input.length - cursor < 4) break; cursor += 4; }
+    if (input.length - cursor < length) break;
+    const payloadStart = cursor;
+    const payload = Buffer.from(input.subarray(payloadStart, payloadStart + length));
+    if (masked) { const mask = input.subarray(payloadStart - 4, payloadStart); for (let index = 0; index < payload.length; index += 1) payload[index] ^= mask[index % 4]; }
+    frames.push({ opcode: first & 0x0f, payload });
+    offset = payloadStart + length;
+  }
+  return { frames, rest: input.subarray(offset) };
+}
+
+function encodeWebSocketFrame(payload, opcode = 0x1) {
+  const data = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+  const header = data.length < 126 ? Buffer.from([0x80 | opcode, data.length])
+    : data.length <= 0xffff ? Buffer.from([0x80 | opcode, 126, (data.length >> 8) & 0xff, data.length & 0xff])
+      : Buffer.concat([Buffer.from([0x80 | opcode, 127]), (() => { const length = Buffer.alloc(8); length.writeBigUInt64BE(BigInt(data.length)); return length; })()]);
+  return Buffer.concat([header, data]);
 }
 
 function routeEndpoint(method, url = '') {
