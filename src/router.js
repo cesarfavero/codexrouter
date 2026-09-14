@@ -1,6 +1,5 @@
 // Architecture adapted from miuuyy/codex-chatgpt-web (MIT). See THIRD_PARTY_NOTICES.md.
 import http from 'node:http';
-import https from 'node:https';
 import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { freshAuth } from './auth.js';
@@ -124,12 +123,11 @@ async function proxyWebSocket({ req, socket, head, upstreamBase, usageReader, on
   socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
 
   let buffer = head?.length ? Buffer.from(head) : Buffer.alloc(0);
-  let upstreamSocket = null;
   let routed = false;
   let account = null;
   let endpoint = 'responses';
   const pending = [];
-  const close = () => { if (!socket.destroyed) socket.end(); if (upstreamSocket && !upstreamSocket.destroyed) upstreamSocket.end(); };
+  const close = () => { if (!socket.destroyed) socket.end(); };
   socket.on('error', close);
   socket.on('close', close);
 
@@ -148,6 +146,7 @@ async function proxyWebSocket({ req, socket, head, upstreamBase, usageReader, on
       parsed.model = isGatewaySlug(requestedModel) ? account.preferredModel : requestedModel;
     }
     if (account.preferredEffort) parsed.reasoning = { ...(parsed.reasoning || {}), effort: parsed.reasoning?.effort || account.preferredEffort };
+    parsed.stream = true;
     const target = new URL(`${upstreamBase.replace(/\/$/, '')}/${endpoint}`);
     const headers = {};
     for (const [name, value] of Object.entries(req.headers)) {
@@ -157,24 +156,25 @@ async function proxyWebSocket({ req, socket, head, upstreamBase, usageReader, on
     headers.authorization = `Bearer ${auth.accessToken}`;
     if (auth.accountId) headers['chatgpt-account-id'] = auth.accountId;
     headers.host = target.host;
-    const client = target.protocol === 'https:' ? https : http;
-    await new Promise((resolve, reject) => {
-      const request = client.request(target, { method: 'GET', headers });
-      request.once('upgrade', (_response, remoteSocket, remoteHead) => {
-        upstreamSocket = remoteSocket;
-        if (remoteHead.length) socket.write(remoteHead);
-        upstreamSocket.on('data', chunk => socket.write(chunk));
-        upstreamSocket.on('error', close);
-        upstreamSocket.on('close', close);
-        resolve();
-      });
-      request.once('response', response => { response.resume(); reject(new Error(`Codex upstream websocket upgrade failed with ${response.statusCode}.`)); });
-      request.once('error', reject);
-      request.end();
-    });
+    headers['content-type'] = 'application/json';
+    headers.accept = 'text/event-stream';
+    const response = await fetch(target, { method: 'POST', headers, body: JSON.stringify(parsed) });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(`Codex upstream request failed with ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
+    }
     routed = true;
-    await onRequest?.({ account, endpoint, model: parsed.model ?? null, status: 101, transport: 'websocket' });
-    for (const frame of pending.splice(0)) upstreamSocket.write(encodeWebSocketFrame(frame.payload, frame.opcode, true));
+    await onRequest?.({ account, endpoint, model: parsed.model ?? null, status: response.status, transport: 'websocket' });
+    if (response.body) {
+      for await (const chunk of response.body) {
+        if (!socket.destroyed) socket.write(encodeWebSocketFrame(Buffer.from(chunk), 0x1));
+      }
+    }
+    if (!socket.destroyed) {
+      const closePayload = Buffer.from([0x03, 0xE8]);
+      socket.write(encodeWebSocketFrame(closePayload, 0x8));
+      setTimeout(() => { if (!socket.destroyed) socket.end(); }, 500);
+    }
   };
 
   const consume = async chunk => {
@@ -184,7 +184,7 @@ async function proxyWebSocket({ req, socket, head, upstreamBase, usageReader, on
     for (const frame of frames.frames) {
       if (frame.opcode === 0x8) { close(); return; }
       if (frame.opcode === 0x9) { socket.write(encodeWebSocketFrame(frame.payload, 0xA)); continue; }
-      if (routed) { upstreamSocket?.write(encodeWebSocketFrame(frame.payload, frame.opcode, true)); continue; }
+      if (routed) continue;
       pending.push(frame);
       if (frame.opcode === 0x1) {
         try { await routeAndConnect(JSON.parse(frame.payload.toString('utf8'))); }
