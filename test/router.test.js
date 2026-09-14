@@ -42,6 +42,20 @@ async function fixture() {
   };
 }
 
+test('responses capability negotiation falls back from WebSocket to HTTP/SSE', async () => {
+  const state = await fixture();
+  const router = startRouter({ port: 0 });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`);
+    assert.equal(response.status, 426);
+    assert.match(await response.text(), /Responses WebSocket transport is not enabled/);
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    state.restore();
+  }
+});
+
 test('gateway routes through the explicitly active account and its preferred native model', async () => {
   const state = await fixture();
   let seen = null;
