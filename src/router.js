@@ -77,7 +77,7 @@ export function startRouter({
         if (gatewayRequest) {
           if (qualified) {
             account = allAccounts().find(candidate => candidate.id === qualified.accountId);
-            if (!account) throw httpError(400, `Unknown CodexRouter account model: ${requestedModel}`);
+            if (!account || account.enabled === false) throw httpError(400, `CodexRouter account is disabled: ${requestedModel}`);
             const usage = await readUsageSafely(usageReader, account);
             if (!usageIsHealthy(usage)) throw cooldownError(account, usage);
             parsed.model = qualified.modelSlug;
@@ -209,6 +209,7 @@ async function readUsageSafely(usageReader, account, options = {}) {
 async function selectGatewayAccount(active, usageReader, { force = false, exclude = new Set() } = {}) {
   const accounts = allAccounts();
   const candidates = [active, ...accounts.filter(account => account.id !== active.id)]
+    .filter(account => account?.enabled !== false)
     .filter((account, index, list) => !exclude.has(account.id) && list.findIndex(item => item.id === account.id) === index);
   const healthy = [];
   for (const account of candidates) {

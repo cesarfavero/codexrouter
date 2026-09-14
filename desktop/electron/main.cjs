@@ -146,6 +146,7 @@ async function snapshot() {
       expiresAt: identity?.expiresAt ?? null,
       isDefault: registry.defaultAccountId === account.id,
       isActive: registry.defaultAccountId === account.id,
+      enabled: account.enabled !== false,
       preferredModel: account.preferredModel ?? null,
       preferredEffort: account.preferredEffort ?? null,
       availableModels: account.availableModels?.length
@@ -363,6 +364,15 @@ function registerIpc() {
     const account = store.setDefaultAccount(String(accountId));
     const result = await syncCatalogBestEffort();
     record('info', `Gateway active account set to ${account.label}${result?.nativeModel ? ` using ${result.nativeModel}` : ''}.`);
+    sendEvent({ type: 'snapshot-invalidated' });
+    return snapshot();
+  }));
+
+  ipcMain.handle('codexrouter:account:enabled', (_event, accountId, enabled) => withOperation(enabled ? 'Enable account' : 'Disable account', async () => {
+    const { store } = await core();
+    const account = store.setAccountEnabled(String(accountId), Boolean(enabled));
+    const result = await syncCatalogBestEffort();
+    record('info', `${enabled ? 'Enabled' : 'Disabled'} ${account.label} for gateway routing${result?.nativeModel ? ` using ${result.nativeModel}` : ''}.`);
     sendEvent({ type: 'snapshot-invalidated' });
     return snapshot();
   }));

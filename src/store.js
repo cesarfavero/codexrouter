@@ -52,6 +52,7 @@ export function registerAccount(label, metadata = {}) {
     plan: metadata.plan ?? null,
     preferredEffort: metadata.preferredEffort ?? null,
     modelSelectionSource: 'automatic',
+    enabled: metadata.enabled ?? true,
     createdAt: new Date().toISOString(),
   };
   registry.accounts.push(account);
@@ -87,10 +88,20 @@ export function setDefaultAccount(idOrLabel) {
   return account;
 }
 
+export function setAccountEnabled(idOrLabel, enabled) {
+  const { registry, account } = getAccount(idOrLabel);
+  account.enabled = Boolean(enabled);
+  if (!account.enabled && registry.defaultAccountId === account.id) {
+    registry.defaultAccountId = registry.accounts.find(item => item.enabled !== false)?.id ?? null;
+  }
+  saveRegistry(registry);
+  return account;
+}
+
 export function defaultAccount() {
   const registry = loadRegistry();
-  const account = registry.accounts.find(item => item.id === registry.defaultAccountId)
-    ?? registry.accounts[0];
+  const account = registry.accounts.find(item => item.id === registry.defaultAccountId && item.enabled !== false)
+    ?? registry.accounts.find(item => item.enabled !== false);
   if (!account) throw new Error('No accounts configured. Run: codexrouter account add <name>');
   return account;
 }

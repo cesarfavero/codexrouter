@@ -138,8 +138,8 @@ function AccountsSurface({ snapshot, onAdd, onRefresh, setError, setLogin, onOpe
               account={account}
               key={account.id}
               onOpen={() => onOpenAccount(account.id)}
-              onActivate={async () => {
-                try { await api!.setDefaultAccount(account.id); await onRefresh(); } catch (cause) { setError(messageOf(cause)); }
+              onToggle={async () => {
+                try { await api!.setAccountEnabled(account.id, !account.enabled); await onRefresh(); } catch (cause) { setError(messageOf(cause)); }
               }}
               onReauth={async () => {
                 setLogin({ accountId: account.id, state: 'starting' });
@@ -167,9 +167,9 @@ function AccountsSurface({ snapshot, onAdd, onRefresh, setError, setLogin, onOpe
   );
 }
 
-function AccountRow({ account, onActivate, onReauth, onRemove, onOpen }: {
+function AccountRow({ account, onToggle, onReauth, onRemove, onOpen }: {
   account: AccountSummary;
-  onActivate: () => void;
+  onToggle: () => void;
   onReauth: () => void;
   onRemove: () => void;
   onOpen: () => void;
@@ -187,7 +187,7 @@ function AccountRow({ account, onActivate, onReauth, onRemove, onOpen }: {
       <div className="account-identity">
         <div className="account-title-line">
           <strong>{account.label}</strong>
-          {account.isActive ? <span className="soft-badge">Active</span> : null}
+          {account.isActive ? <span className="soft-badge">Default</span> : null}
           {account.plan ? <span className="plan-badge">{formatPlan(account.plan)}</span> : null}
         </div>
           <span>{account.email || 'Email becomes available after login'}{account.preferredModel ? ` · ${account.preferredModel}` : ''}{account.preferredEffort ? ` · ${account.preferredEffort} effort` : ''}</span>
@@ -195,7 +195,7 @@ function AccountRow({ account, onActivate, onReauth, onRemove, onOpen }: {
       <div className="account-models"><strong>{usageValue}</strong><span>{usageCaption}</span></div>
       <div className="account-status"><StatusDot tone={statusTone} /><span>{statusText}</span></div>
       <div className="account-actions" onClick={event => event.stopPropagation()}>
-        {!account.isActive ? <IconButton icon="check" label="Use for gateway" onClick={onActivate} /> : null}
+        <Toggle checked={account.enabled} onChange={onToggle} label={`${account.enabled ? 'Disable' : 'Enable'} ${account.label} for gateway`} />
         <IconButton icon="refresh" label="Re-authenticate" onClick={onReauth} />
         <IconButton danger icon="trash" label="Remove" onClick={onRemove} />
       </div>
@@ -449,7 +449,7 @@ function SecondaryButton({ children, icon, ...props }: React.ButtonHTMLAttribute
 function IconButton({ icon, label, danger, onClick }: { icon: IconName; label: string; danger?: boolean; onClick: () => void }) { return <button aria-label={label} className={`icon-button ${danger ? 'danger' : ''}`} onClick={onClick} title={label} type="button"><Icon name={icon}/></button>; }
 function Metric({ label, value, tone }: { label: string; value: string; tone?: 'success' | 'neutral' }) { return <div className="metric"><span>{label}</span><strong className={tone === 'success' ? 'success-text' : ''}>{value}</strong></div>; }
 function SettingRow({ title, description, children }: { title: string; description: string; children: ReactNode }) { return <div className="setting-row"><div><strong>{title}</strong><p>{description}</p></div><div className="setting-value">{children}</div></div>; }
-function Toggle({ checked, disabled, onChange }: { checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) { return <button aria-checked={checked} className={`toggle ${checked ? 'is-on' : ''}`} disabled={disabled} onClick={() => onChange(!checked)} role="switch" type="button"><span/></button>; }
+function Toggle({ checked, disabled, label, onChange }: { checked: boolean; disabled?: boolean; label?: string; onChange: (checked: boolean) => void }) { return <button aria-label={label} aria-checked={checked} className={`toggle ${checked ? 'is-on' : ''}`} disabled={disabled} onClick={event => { event.stopPropagation(); onChange(!checked); }} role="switch" type="button"><span/></button>; }
 function OperationPill({ operation }: { operation: Operation }) { return <motion.div animate={{ opacity: 1, y: 0 }} className="operation-pill" exit={{ opacity: 0, y: 8 }} initial={{ opacity: 0, y: 8 }}><div className="spinner small"/><span>{operation.name}</span></motion.div>; }
 function ErrorToast({ message, onDismiss }: { message: string; onDismiss: () => void }) { return <motion.div animate={{ opacity: 1, y: 0 }} className="error-toast" exit={{ opacity: 0, y: 8 }} initial={{ opacity: 0, y: 8 }}><span>{message}</span><button onClick={onDismiss} type="button">Dismiss</button></motion.div>; }
 function LoadingState() { return <div className="center-state"><BrandMark/><div className="spinner"/><span>Loading CodexRouter…</span></div>; }
