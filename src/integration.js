@@ -5,6 +5,8 @@ import { catalogPath, integrationJournalPath, mainCodexConfigPath } from './path
 import { ensureDir, readJson, writeJsonAtomic, writeTextAtomic } from './fs-util.js';
 
 const MANAGED_KEYS = ['openai_base_url', 'model_catalog_json'];
+const ROUTER_MODEL_PREFIX = 'codexrouter/';
+const LEGACY_ROUTER_HOME_MARKERS = ['/.codexrouter/', '/.codex-chatgpt-web/'];
 
 function quoteToml(value) {
   return JSON.stringify(value);
@@ -12,6 +14,30 @@ function quoteToml(value) {
 
 function assignmentRegex(key) {
   return new RegExp(`^\\s*${key}\\s*=\\s*.+$`);
+}
+
+function parseTomlStringAssignment(line, key) {
+  if (!line) return null;
+  const match = line.match(new RegExp(`^\\s*${key}\\s*=\\s*("(?:\\\\.|[^"\\\\])*")\\s*(?:#.*)?$`));
+  if (!match) return null;
+  try {
+    const value = JSON.parse(match[1]);
+    return typeof value === 'string' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizePathLike(value) {
+  return value.replaceAll('\\', '/');
+}
+
+function isRouterCatalogAssignment(line) {
+  const value = parseTomlStringAssignment(line, 'model_catalog_json');
+  if (!value) return false;
+  const normalized = normalizePathLike(value);
+  if (normalized === normalizePathLike(catalogPath())) return true;
+  return LEGACY_ROUTER_HOME_MARKERS.some(marker => normalized.includes(marker));
 }
 
 function firstTableIndex(lines) {
@@ -48,6 +74,13 @@ function removeManagedLine(lines, key, expected) {
   lines.splice(current.index, 1);
 }
 
+function removeRouterModelSelection(lines) {
+  const current = findTopLevel(lines, 'model');
+  if (!current) return;
+  const model = parseTomlStringAssignment(current.line, 'model');
+  if (model?.startsWith(ROUTER_MODEL_PREFIX)) lines.splice(current.index, 1);
+}
+
 export function installIntegration({ port = 17842 } = {}) {
   const configPath = mainCodexConfigPath();
   ensureDir(path.dirname(configPath));
@@ -72,11 +105,13 @@ export function installIntegration({ port = 17842 } = {}) {
 export function uninstallIntegration() {
   const journal = readJson(integrationJournalPath());
   if (!journal) throw new Error('CodexRouter integration is not installed.');
-  let text = fs.readFileSync(journal.configPath, 'utf8');
+  const text = fs.readFileSync(journal.configPath, 'utf8');
   const lines = text.replace(/\n$/, '').split(/\r?\n/);
+  const previousWasRouterIntegration = isRouterCatalogAssignment(journal.previous?.model_catalog_json?.line);
+
   for (const key of MANAGED_KEYS) {
-    const previous = journal.previous[key];
-    if (previous?.line) {
+    const previous = journal.previous?.[key];
+    if (previous?.line && !previousWasRouterIntegration) {
       const current = findTopLevel(lines, key);
       if (!current || current.line !== journal.installed[key]) {
         throw new Error(`Codex ${key} changed after install; refusing automatic restore.`);
@@ -86,6 +121,8 @@ export function uninstallIntegration() {
       removeManagedLine(lines, key, journal.installed[key]);
     }
   }
+
+  removeRouterModelSelection(lines);
   while (lines.length && lines[0] === '' && lines[1] === '') lines.shift();
   writeTextAtomic(journal.configPath, `${lines.join('\n')}\n`, 0o600);
   fs.rmSync(integrationJournalPath(), { force: true });
