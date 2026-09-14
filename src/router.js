@@ -209,14 +209,33 @@ async function selectGatewayAccount(active, usageReader, { force = false, exclud
   const accounts = allAccounts();
   const candidates = [active, ...accounts.filter(account => account.id !== active.id)]
     .filter((account, index, list) => !exclude.has(account.id) && list.findIndex(item => item.id === account.id) === index);
+  const healthy = [];
   for (const account of candidates) {
     const usage = await readUsageSafely(usageReader, account, { force });
     if (usageIsHealthy(usage)) {
-      if (account.id !== active.id) setDefaultAccount(account.id);
-      return account;
+      healthy.push({ account, usage, score: accountHeadroomScore(usage) });
     }
   }
+  if (healthy.length) {
+    healthy.sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      return left.account.id === active.id ? -1 : right.account.id === active.id ? 1 : 0;
+    });
+    const selected = healthy[0].account;
+    if (selected.id !== active.id) setDefaultAccount(selected.id);
+    return selected;
+  }
   throw cooldownError(active, await readUsageSafely(usageReader, active, { force }));
+}
+
+function accountHeadroomScore(usage) {
+  const windows = [usage.primary?.remainingPercent, usage.secondary?.remainingPercent, usage.spendControl?.remainingPercent]
+    .filter(value => Number.isFinite(value));
+  if (!windows.length) return 50;
+  // The narrowest remaining window is the hard constraint; the average breaks ties.
+  const minimum = Math.min(...windows);
+  const average = windows.reduce((sum, value) => sum + value, 0) / windows.length;
+  return (minimum * 0.8) + (average * 0.2);
 }
 
 function usageIsHealthy(usage) {

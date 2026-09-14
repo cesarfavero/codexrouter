@@ -270,6 +270,37 @@ test('gateway automatically rolls over from a cooldown account', async () => {
   }
 });
 
+test('gateway selects the healthy account with the most quota headroom', async () => {
+  const state = await fixture();
+  const upstream = http.createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end('data: [DONE]\n\n');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({
+    port: 0,
+    upstreamBase: `http://127.0.0.1:${upstream.address().port}`,
+    usageReader: async account => account.id === 'eduardo'
+      ? { status: 'available', primary: { remainingPercent: 90 }, secondary: { remainingPercent: 83 } }
+      : { status: 'available', primary: { remainingPercent: 100 }, secondary: { remainingPercent: 69 } },
+  });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal((await import('../src/store.js')).defaultAccount().id, 'eduardo');
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+    state.restore();
+  }
+});
+
 test('gateway rolls over when the active account is nearly exhausted', async () => {
   const state = await fixture();
   let seenAccount = null;
