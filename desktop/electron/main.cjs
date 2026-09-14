@@ -253,6 +253,19 @@ function validateLabel(value) {
   return label;
 }
 
+function launchCodex(auth) {
+  const configuredProject = String(process.env.CODEXROUTER_PROJECT_DIR || '').trim();
+  if (process.platform === 'darwin' && !configuredProject) {
+    const child = spawn('/usr/bin/open', ['-a', 'Codex'], { detached: true, stdio: 'ignore' });
+    child.unref();
+    return;
+  }
+  const options = { detached: true, stdio: 'ignore', env: process.env };
+  if (configuredProject) options.cwd = configuredProject;
+  const child = spawn(auth.codexBinary(), ['app', ...(configuredProject ? [configuredProject] : [])], options);
+  child.unref();
+}
+
 async function authenticateAccount(account, operationName, { reuseMainSession = false } = {}) {
   const { auth, store, usage } = await core();
   let identity = null;
@@ -380,8 +393,7 @@ function registerIpc() {
 
   ipcMain.handle('codexrouter:open-codex', async () => {
     const { auth } = await core();
-    const child = spawn(auth.codexBinary(), ['app'], { detached: true, stdio: 'ignore', cwd: process.env.CODEXROUTER_PROJECT_DIR || app.getPath('home'), env: process.env });
-    child.unref();
+    launchCodex(auth);
     record('info', 'Requested Codex Desktop launch.');
     return { ok: true };
   });
@@ -534,8 +546,7 @@ function wireInternalEvents() {
   ipcMain.on('codexrouter:tray-open-codex', async () => {
     try {
       const { auth } = await core();
-      const child = spawn(auth.codexBinary(), ['app'], { detached: true, stdio: 'ignore', cwd: process.env.CODEXROUTER_PROJECT_DIR || app.getPath('home'), env: process.env });
-      child.unref();
+      launchCodex(auth);
     } catch (error) {
       record('error', `Open Codex: ${error.message}`);
     }
