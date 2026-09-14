@@ -174,7 +174,7 @@ async function proxyWebSocket({ req, socket, head, upstreamBase, usageReader, on
     });
     routed = true;
     await onRequest?.({ account, endpoint, model: parsed.model ?? null, status: 101, transport: 'websocket' });
-    for (const frame of pending.splice(0)) upstreamSocket.write(encodeWebSocketFrame(frame.payload, frame.opcode));
+    for (const frame of pending.splice(0)) upstreamSocket.write(encodeWebSocketFrame(frame.payload, frame.opcode, true));
   };
 
   const consume = async chunk => {
@@ -184,7 +184,7 @@ async function proxyWebSocket({ req, socket, head, upstreamBase, usageReader, on
     for (const frame of frames.frames) {
       if (frame.opcode === 0x8) { close(); return; }
       if (frame.opcode === 0x9) { socket.write(encodeWebSocketFrame(frame.payload, 0xA)); continue; }
-      if (routed) { upstreamSocket?.write(encodeWebSocketFrame(frame.payload, frame.opcode)); continue; }
+      if (routed) { upstreamSocket?.write(encodeWebSocketFrame(frame.payload, frame.opcode, true)); continue; }
       pending.push(frame);
       if (frame.opcode === 0x1) {
         try { await routeAndConnect(JSON.parse(frame.payload.toString('utf8'))); }
@@ -218,12 +218,17 @@ function decodeWebSocketFrames(input) {
   return { frames, rest: input.subarray(offset) };
 }
 
-function encodeWebSocketFrame(payload, opcode = 0x1) {
+function encodeWebSocketFrame(payload, opcode = 0x1, masked = false) {
   const data = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
-  const header = data.length < 126 ? Buffer.from([0x80 | opcode, data.length])
-    : data.length <= 0xffff ? Buffer.from([0x80 | opcode, 126, (data.length >> 8) & 0xff, data.length & 0xff])
-      : Buffer.concat([Buffer.from([0x80 | opcode, 127]), (() => { const length = Buffer.alloc(8); length.writeBigUInt64BE(BigInt(data.length)); return length; })()]);
-  return Buffer.concat([header, data]);
+  const maskBit = masked ? 0x80 : 0;
+  const mask = masked ? crypto.randomBytes(4) : null;
+  const header = data.length < 126 ? Buffer.from([0x80 | opcode, maskBit | data.length])
+    : data.length <= 0xffff ? Buffer.from([0x80 | opcode, maskBit | 126, (data.length >> 8) & 0xff, data.length & 0xff])
+      : Buffer.concat([Buffer.from([0x80 | opcode, maskBit | 127]), (() => { const length = Buffer.alloc(8); length.writeBigUInt64BE(BigInt(data.length)); return length; })()]);
+  if (!masked) return Buffer.concat([header, data]);
+  const encoded = Buffer.from(data);
+  for (let index = 0; index < encoded.length; index += 1) encoded[index] ^= mask[index % 4];
+  return Buffer.concat([header, mask, encoded]);
 }
 
 function routeEndpoint(method, url = '') {
