@@ -73,7 +73,7 @@ export function App() {
           <div className="runtime-mini">
             <StatusDot tone={snapshot.runtime.running ? 'success' : 'neutral'} />
             <div>
-              <strong>{snapshot.runtime.running ? 'Gateway running' : 'Gateway stopped'}</strong>
+              <strong>{snapshot.runtime.running ? 'Router online' : 'Router offline'}</strong>
               <span>{activeAccount ? `${activeAccount.label} · ${activeAccount.preferredModel || 'sync model'}` : 'No active account'}</span>
             </div>
           </div>
