@@ -29,6 +29,7 @@ export type AccountSummary = {
   email: string | null;
   plan: string | null;
   connected: boolean;
+  enabled: boolean;
   expiresAt: number | null;
   isDefault: boolean;
   isActive: boolean;
@@ -89,6 +90,7 @@ export type CodexRouterDesktopApi = {
   reauthenticateAccount(accountId: string): Promise<Snapshot>;
   removeAccount(accountId: string): Promise<Snapshot>;
   setDefaultAccount(accountId: string): Promise<Snapshot>;
+  setAccountEnabled(accountId: string, enabled: boolean): Promise<Snapshot>;
   setAccountPreferences(accountId: string, preferences: { preferredModel?: string | null; preferredEffort?: string | null }): Promise<Snapshot>;
   syncCatalog(): Promise<Snapshot>;
   install(): Promise<Snapshot>;
