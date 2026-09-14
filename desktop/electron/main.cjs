@@ -204,13 +204,22 @@ function validateLabel(value) {
   return label;
 }
 
-async function authenticateAccount(account, operationName) {
+async function authenticateAccount(account, operationName, { reuseMainSession = false } = {}) {
   const { auth, store, usage } = await core();
-  sendEvent({ type: 'login-state', accountId: account.id, state: 'starting' });
-  const identity = await auth.loginInteractive(account.codexHome, {
-    onAuthUrl: url => sendEvent({ type: 'login-url', accountId: account.id, url }),
-    onState: state => sendEvent({ type: 'login-state', accountId: account.id, state }),
-  });
+  let identity = null;
+  if (reuseMainSession) {
+    sendEvent({ type: 'login-state', accountId: account.id, state: 'reusing-session' });
+    identity = auth.reuseMainCodexSession(account.codexHome);
+  }
+  if (!identity) {
+    sendEvent({ type: 'login-state', accountId: account.id, state: 'starting' });
+    identity = await auth.loginInteractive(account.codexHome, {
+      onAuthUrl: url => sendEvent({ type: 'login-url', accountId: account.id, url }),
+      onState: state => sendEvent({ type: 'login-state', accountId: account.id, state }),
+    });
+  } else {
+    sendEvent({ type: 'login-state', accountId: account.id, state: 'authenticated' });
+  }
   store.updateAccount(account.id, { email: identity.email, plan: identity.plan });
   usage.invalidateAccountUsage(account.id);
   record('info', `${operationName} completed for ${account.label}.`);
@@ -224,9 +233,10 @@ function registerIpc() {
 
   ipcMain.handle('codexrouter:account:add', (_event, rawLabel) => withOperation('Add account', async () => {
     const { store } = await core();
+    const hadAccounts = store.loadRegistry().accounts.length > 0;
     const account = store.registerAccount(validateLabel(rawLabel));
     record('info', `Created isolated Codex profile for ${account.label}.`);
-    return authenticateAccount(account, 'Authentication');
+    return authenticateAccount(account, 'Authentication', { reuseMainSession: !hadAccounts });
   }));
 
   ipcMain.handle('codexrouter:account:reauth', (_event, accountId) => withOperation('Re-authenticate account', async () => {

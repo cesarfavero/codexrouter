@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { ensureDir, readJson, writeTextAtomic } from './fs-util.js';
+import { mainCodexHome } from './paths.js';
 
 export function codexBinary() {
   const configured = process.env.CODEX_BIN?.trim();
@@ -36,6 +37,25 @@ export function prepareAccountCodexHome(codexHome) {
     if (!/^\s*cli_auth_credentials_store\s*=/m.test(text)) {
       writeTextAtomic(configPath, `cli_auth_credentials_store = "file"\n${text}`);
     }
+  }
+}
+
+/**
+ * Reuses the official user's existing Codex session for the first isolated account.
+ * Only the local auth file is copied; each account keeps its own CODEX_HOME afterwards.
+ */
+export function reuseMainCodexSession(codexHome) {
+  const source = path.join(mainCodexHome(), 'auth.json');
+  const target = path.join(codexHome, 'auth.json');
+  if (fs.existsSync(target) || !fs.existsSync(source)) return null;
+  try {
+    const identity = inspectAuth(mainCodexHome());
+    ensureDir(codexHome);
+    fs.copyFileSync(source, target);
+    fs.chmodSync(target, 0o600);
+    return identity;
+  } catch {
+    return null;
   }
 }
 

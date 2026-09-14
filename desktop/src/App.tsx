@@ -375,7 +375,7 @@ function FatalState({ title, body }: { title: string; body: string }) { return <
 function formatPlan(plan: string) { const normalized = String(plan).replace(/[_-]+/g, ' '); return normalized.replace(/\b\w/g, char => char.toUpperCase()); }
 function initials(value: string) { return value.trim().split(/\s+/).slice(0, 2).map(part => part[0]?.toUpperCase()).join('') || 'A'; }
 function formatReset(seconds: number) { return new Date(seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
-function loginStateLabel(state?: string) { if (state === 'starting') return 'Starting Codex login…'; if (state === 'waiting-for-browser') return 'Waiting for browser authentication…'; if (state === 'authenticated') return 'Authentication complete'; return 'Waiting for Codex…'; }
+function loginStateLabel(state?: string) { if (state === 'reusing-session') return 'Reusing your existing Codex session…'; if (state === 'starting') return 'Starting Codex login…'; if (state === 'waiting-for-browser') return 'Waiting for browser authentication…'; if (state === 'authenticated') return 'Authentication complete'; return 'Waiting for Codex…'; }
 function messageOf(error: unknown) { return error instanceof Error ? error.message : String(error); }
 async function run(work: () => Promise<unknown>, setError: (message: string | null) => void) { setError(null); try { await work(); } catch (cause) { setError(messageOf(cause)); } }
 async function doAndRefresh(work: () => Promise<unknown>, refresh: () => Promise<void>, setError: (message: string | null) => void) { await run(async () => { await work(); await refresh(); }, setError); }

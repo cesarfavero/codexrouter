@@ -85,6 +85,8 @@ CodexRouter starts the official `codex login` inside that directory. The install
 
 CodexRouter does not ask for your ChatGPT password and does not import ChatGPT cookies.
 
+When adding the first account, CodexRouter reuses the existing official session from `~/.codex` when one is available, copying it into the account's isolated profile. Additional accounts always use their own official login.
+
 ## Usage and cooldown telemetry
 
 CodexRouter passively reads the same ChatGPT/Codex usage surface used by Codex for account rate-limit state. The desktop app can show, when available:
