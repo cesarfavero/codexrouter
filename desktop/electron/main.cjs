@@ -160,12 +160,26 @@ async function startRuntime(preferredPort) {
   if (routerServer?.listening) return snapshot();
   const { router } = await core();
   routerPort = Number(preferredPort || DEFAULT_PORT);
-  const server = router.startRouter({
+  let server = router.startRouter({
     port: routerPort,
     onRequest: event => record('info', `Request via Router → ${event.account.label} · ${event.model || event.endpoint} · ${event.status} (${event.transport}).`),
   });
+  try {
+    await waitForServer(server);
+  } catch (error) {
+    if (error?.code !== 'EADDRINUSE') throw error;
+    server.close();
+    const stopped = stopCodexRouterPortOwner(routerPort);
+    if (!stopped) throw new Error(`Port ${routerPort} is already in use by another process. Stop it manually before starting CodexRouter.`);
+    record('warning', `Restarting the previous Router process on port ${routerPort}.`);
+    await new Promise(resolve => setTimeout(resolve, 150));
+    server = router.startRouter({
+      port: routerPort,
+      onRequest: event => record('info', `Request via Router → ${event.account.label} · ${event.model || event.endpoint} · ${event.status} (${event.transport}).`),
+    });
+    await waitForServer(server);
+  }
   routerServer = server;
-  if (!server.listening) await once(server, 'listening');
   server.once('close', () => {
     if (routerServer === server) routerServer = null;
     sendEvent({ type: 'snapshot-invalidated' });
@@ -175,6 +189,30 @@ async function startRuntime(preferredPort) {
   record('info', `Router listening on 127.0.0.1:${routerPort}.`);
   sendEvent({ type: 'snapshot-invalidated' });
   return snapshot();
+}
+
+function waitForServer(server) {
+  if (server.listening) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const onListening = () => { cleanup(); resolve(); };
+    const onError = error => { cleanup(); reject(error); };
+    const cleanup = () => { server.off('listening', onListening); server.off('error', onError); };
+    server.once('listening', onListening);
+    server.once('error', onError);
+  });
+}
+
+function stopCodexRouterPortOwner(port) {
+  const result = spawnSync('/usr/sbin/lsof', ['-tiTCP:' + port, '-sTCP:LISTEN', '-n', '-P'], { encoding: 'utf8' });
+  const pids = String(result.stdout || '').split(/\s+/).filter(Boolean).map(value => Number(value)).filter(Number.isInteger);
+  let stopped = false;
+  for (const pid of pids) {
+    if (pid === process.pid) continue;
+    const command = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).stdout || '';
+    if (!/codexrouter|codex-router|src\/cli\.js start/i.test(command)) continue;
+    try { process.kill(pid, 'SIGTERM'); stopped = true; } catch {}
+  }
+  return stopped;
 }
 
 async function stopRuntime() {
