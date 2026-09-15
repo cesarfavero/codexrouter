@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -20,6 +21,7 @@ let routerPort = DEFAULT_PORT;
 let isQuitting = false;
 let corePromise = null;
 let updateTimer = null;
+let updateInfo = null;
 const logs = loadLogs();
 
 function loadLogs() {
@@ -86,13 +88,8 @@ function sendEvent(payload) {
 }
 
 async function checkForUpdates() {
-  try {
-    const response = await fetch(UPDATE_CHECK_URL, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'CodexRouter' } });
-    if (!response.ok) return;
-    const release = await response.json();
-    const version = String(release.tag_name || '').replace(/^v/, '');
-    if (version && isNewerVersion(version, app.getVersion())) sendEvent({ type: 'update-available', version, url: release.html_url });
-  } catch {}
+  if (!app.isPackaged) return;
+  try { await autoUpdater.checkForUpdates(); } catch (error) { record('warning', `Update check failed: ${error.message}`); }
 }
 
 function isNewerVersion(candidate, current) {
@@ -325,6 +322,17 @@ async function authenticateAccount(account, operationName, { reuseMainSession = 
 
 function registerIpc() {
   ipcMain.handle('codexrouter:snapshot', () => snapshot());
+  ipcMain.handle('codexrouter:update:download', async () => {
+    if (!updateInfo) throw new Error('No update is available.');
+    await autoUpdater.downloadUpdate();
+    return { ok: true };
+  });
+  ipcMain.handle('codexrouter:update:install', () => {
+    if (!updateInfo) throw new Error('No update is ready.');
+    isQuitting = true;
+    autoUpdater.quitAndInstall(false, true);
+    return { ok: true };
+  });
 
   ipcMain.handle('codexrouter:account:add', (_event, rawLabel, rawAuthMode) => withOperation('Add account', async () => {
     const { store } = await core();
@@ -594,6 +602,21 @@ function wireInternalEvents() {
   });
 }
 
+function wireAutoUpdater() {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('checking-for-update', () => sendEvent({ type: 'update-state', state: 'checking' }));
+  autoUpdater.on('update-available', info => {
+    updateInfo = info;
+    sendEvent({ type: 'update-available', version: info.version, url: info.releaseUrl || UPDATE_CHECK_URL });
+    record('info', `Update ${info.version} available for ${process.platform}.`);
+  });
+  autoUpdater.on('update-not-available', () => sendEvent({ type: 'update-state', state: 'up-to-date' }));
+  autoUpdater.on('download-progress', progress => sendEvent({ type: 'update-progress', percent: progress.percent, transferred: progress.transferred, total: progress.total }));
+  autoUpdater.on('update-downloaded', info => { updateInfo = info; sendEvent({ type: 'update-downloaded', version: info.version }); record('info', `Update ${info.version} downloaded and ready to install.`); });
+  autoUpdater.on('error', error => { record('error', `Updater: ${error.message}`); sendEvent({ type: 'update-state', state: 'error', message: error.message }); });
+}
+
 const lock = app.requestSingleInstanceLock();
 if (!lock) {
   app.quit();
@@ -608,6 +631,7 @@ if (!lock) {
   app.whenReady().then(async () => {
     registerIpc();
     wireInternalEvents();
+    wireAutoUpdater();
     createTray();
     const hidden = process.argv.includes('--hidden');
     createWindow({ hidden });

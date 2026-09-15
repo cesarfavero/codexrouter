@@ -1,6 +1,6 @@
 {
   "name": "codexrouter",
-  "version": "0.4.24",
+  "version": "0.4.25",
   "description": "Desktop-first single-model gateway for Codex with isolated ChatGPT accounts and usage telemetry.",
   "type": "module",
   "main": "desktop/electron/main.cjs",
@@ -21,6 +21,7 @@
     "e2e:mac": "node scripts/e2e-macos.mjs"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "motion": "^12.42.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -51,6 +52,12 @@
     "directories": {
       "output": "release"
     },
+    "publish": {
+      "provider": "github",
+      "owner": "cesarfavero",
+      "repo": "codexrouter",
+      "releaseType": "release"
+    },
     "files": [
       "desktop/dist/**",
       "desktop/electron/**",
@@ -66,14 +73,21 @@
       "category": "public.app-category.developer-tools",
       "minimumSystemVersion": "13.0",
       "hardenedRuntime": true,
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     },
     "linux": {
       "category": "Development",
-      "target": ["AppImage"]
+      "target": [
+        "AppImage"
+      ]
     },
     "nsis": {
       "oneClick": false,

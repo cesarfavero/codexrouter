@@ -19,6 +19,8 @@ export function App() {
   const [addOpen, setAddOpen] = useState(false);
   const [login, setLogin] = useState<{ accountId?: string; state?: string; url?: string } | null>(null);
   const [update, setUpdate] = useState<{ version: string; url: string } | null>(null);
+  const [updateState, setUpdateState] = useState<'available' | 'downloading' | 'ready' | 'installing' | 'error' | null>(null);
+  const [updateProgress, setUpdateProgress] = useState(0);
 
   const refresh = useCallback(async () => {
     if (!api) return;
@@ -37,7 +39,10 @@ export function App() {
       if (event.type === 'log') setLogs(current => [...current.slice(-249), event.record]);
       if (event.type === 'login-state') setLogin(current => ({ ...current, accountId: event.accountId, state: event.state }));
       if (event.type === 'login-url') setLogin(current => ({ ...current, accountId: event.accountId, url: event.url }));
-      if (event.type === 'update-available') setUpdate({ version: event.version, url: event.url });
+      if (event.type === 'update-available') { setUpdate({ version: event.version, url: event.url }); setUpdateState('available'); setUpdateProgress(0); }
+      if (event.type === 'update-progress') { setUpdateState('downloading'); setUpdateProgress(event.percent); }
+      if (event.type === 'update-downloaded') { setUpdateState('ready'); setUpdateProgress(100); }
+      if (event.type === 'update-state' && event.state === 'error') setUpdateState('error');
     });
   }, [refresh]);
 
@@ -93,7 +98,7 @@ export function App() {
         </header>
 
         <div className="content-scroll">
-          {update ? <div className="update-banner"><span>CodexRouter {update.version} is available.</span><button onClick={() => void api.openExternal(update.url)} type="button">View release</button><button aria-label="Hide update" onClick={() => setUpdate(null)} type="button">Hide</button></div> : null}
+          {update ? <div className="update-banner"><span><strong>CodexRouter {update.version}</strong>{updateState === 'downloading' ? `Downloading update… ${Math.round(updateProgress)}%` : updateState === 'ready' ? 'Ready to install and restart.' : updateState === 'error' ? 'Download failed. Try again.' : 'New update available.'}</span>{updateState === 'available' || updateState === 'error' ? <button onClick={() => { setUpdateState('downloading'); void api.downloadUpdate().catch(() => setUpdateState('error')); }} type="button">Download</button> : null}{updateState === 'ready' ? <button onClick={() => { setUpdateState('installing'); void api.installUpdate(); }} type="button">Install & restart</button> : null}<button onClick={() => setUpdate(null)} type="button">Hide</button>{updateState === 'downloading' ? <div aria-label={`Download progress ${Math.round(updateProgress)}%`} className="update-progress"><i style={{ width: `${updateProgress}%` }} /></div> : null}</div> : null}
           <AnimatePresence mode="wait">
             <motion.section animate={{ opacity: 1, y: 0 }} className="surface" exit={{ opacity: 0, y: -5 }} initial={{ opacity: 0, y: 7 }} key={surface} transition={transition}>
               {surface === 'overview' ? <OverviewSurface snapshot={snapshot} logs={logs} onOpenAccount={accountId => { setSelectedAccountId(accountId); setSurface('account-detail'); }} onOpenActivity={() => setSurface('activity')} /> : null}

@@ -27,5 +27,7 @@ contextBridge.exposeInMainWorld('codexRouter', {
   setAutostart: enabled => invoke('codexrouter:autostart:set', enabled),
   openExternal: url => invoke('codexrouter:open-external', url),
   revealData: () => invoke('codexrouter:reveal-data'),
+  downloadUpdate: () => invoke('codexrouter:update:download'),
+  installUpdate: () => invoke('codexrouter:update:install'),
   onEvent,
 });

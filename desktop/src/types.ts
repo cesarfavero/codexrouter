@@ -77,6 +77,9 @@ export type Snapshot = {
 
 export type LauncherEvent =
   | { type: 'update-available'; version: string; url: string }
+  | { type: 'update-downloaded'; version: string }
+  | { type: 'update-progress'; percent: number; transferred: number; total: number }
+  | { type: 'update-state'; state: string; message?: string }
   | { type: 'snapshot-invalidated' }
   | { type: 'open-add-account' }
   | { type: 'login-url'; accountId: string; url: string }
@@ -101,6 +104,8 @@ export type CodexRouterDesktopApi = {
   setAutostart(enabled: boolean): Promise<{ supported: boolean; enabled: boolean }>;
   openExternal(url: string): Promise<void>;
   revealData(): Promise<{ ok: boolean }>;
+  downloadUpdate(): Promise<{ ok: boolean }>;
+  installUpdate(): Promise<{ ok: boolean }>;
   onEvent(callback: (event: LauncherEvent) => void): () => void;
 };
 
