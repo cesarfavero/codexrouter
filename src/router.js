@@ -117,9 +117,9 @@ export function startRouter({
       try { requestModel = JSON.parse(body.toString('utf8')).model ?? null; } catch {}
       routedAccount = account;
       routedModel = requestModel;
-      const usagePromise = await writeResponse(res, upstream);
+      const usage = await writeResponse(res, upstream);
       await emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http', durationMs: Date.now() - startedAt, attempts, usage: null });
-      if (usagePromise) void usagePromise.then(usage => usage && emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http-usage', durationMs: Date.now() - startedAt, attempts, usage, usageOnly: true }));
+      if (usage) void emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http-usage', durationMs: Date.now() - startedAt, attempts, usage, usageOnly: true });
     } catch (error) {
       const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
       await emitRequest(onRequest, { requestId, account: routedAccount, endpoint: req.url?.split('?')[0] || null, model: routedModel, status, transport: 'http', durationMs: Date.now() - startedAt, attempts, error: sanitizeLogText(error?.message || String(error)) });

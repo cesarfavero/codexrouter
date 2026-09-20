@@ -93,6 +93,41 @@ test('router reports sanitized upstream failure details without consuming the cl
   }
 });
 
+test('router emits usage telemetry without creating a false 500 after a successful response', async () => {
+  const state = await fixture();
+  const events = [];
+  const upstream = http.createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end('data: {"usage":{"input_tokens":4,"output_tokens":6}}\n\ndata: [DONE]\n\n');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({
+    port: 0,
+    upstreamBase: `http://127.0.0.1:${upstream.address().port}`,
+    usageReader: async () => ({ status: 'available' }),
+    onRequest: event => events.push(event),
+  });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(events.map(event => event.status), [200, 200]);
+    assert.equal(events[0].usage, null);
+    assert.equal(events[1].usage.totalTokens, 10);
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+    state.restore();
+  }
+});
+
 test('gateway decodes Codex zstd requests and forwards rewritten JSON without content-encoding', async () => {
   const state = await fixture();
   let seen = null;
