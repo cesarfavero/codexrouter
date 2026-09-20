@@ -235,13 +235,14 @@ async function selectGatewayAccount(active, usageReader, { force = false, exclud
 }
 
 function accountHeadroomScore(usage) {
-  const windows = [usage.primary?.remainingPercent, usage.secondary?.remainingPercent, usage.spendControl?.remainingPercent]
-    .filter(value => Number.isFinite(value));
-  if (!windows.length) return 50;
-  // The narrowest remaining window is the hard constraint; the average breaks ties.
-  const minimum = Math.min(...windows);
-  const average = windows.reduce((sum, value) => sum + value, 0) / windows.length;
-  return (minimum * 0.8) + (average * 0.2);
+  const weighted = [
+    [usage.primary?.remainingPercent, 0.7], // 5-hour capacity is the main task constraint.
+    [usage.secondary?.remainingPercent, 0.2],
+    [usage.spendControl?.remainingPercent, 0.1],
+  ].filter(([value]) => Number.isFinite(value));
+  if (!weighted.length) return 50;
+  const totalWeight = weighted.reduce((sum, [, weight]) => sum + weight, 0);
+  return weighted.reduce((sum, [value, weight]) => sum + (value * weight), 0) / totalWeight;
 }
 
 function usageIsHealthy(usage) {
