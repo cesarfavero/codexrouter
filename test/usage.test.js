@@ -54,6 +54,21 @@ test('usage normalization exposes available windows and spend control', () => {
   assert.equal(usage.cooldownUntil, null);
 });
 
+test('usage normalization does not call a healthy window a cooldown only because allowed is false', () => {
+  const usage = normalizeUsagePayload({
+    rate_limit: {
+      allowed: false,
+      limit_reached: false,
+      primary_window: { used_percent: 20 },
+      secondary_window: { used_percent: 10 },
+    },
+  });
+
+  assert.equal(usage.status, 'unknown');
+  assert.equal(usage.limitReached, false);
+  assert.equal(usage.primary.remainingPercent, 80);
+});
+
 test('usage cache follows the upstream account identity after a profile is reauthenticated', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codexrouter-usage-'));
   const accountHome = path.join(root, 'account');
