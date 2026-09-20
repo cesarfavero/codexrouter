@@ -78,7 +78,8 @@ export function startRouter({
           if (qualified) {
             account = allAccounts().find(candidate => candidate.id === qualified.accountId);
             if (!account || account.enabled === false) throw httpError(400, `CodexRouter account is disabled: ${requestedModel}`);
-            const usage = await readUsageSafely(usageReader, account);
+            let usage = await readUsageSafely(usageReader, account);
+            if (!usageIsHealthy(usage)) usage = await readUsageSafely(usageReader, account, { force: true });
             if (!usageIsHealthy(usage)) throw cooldownError(account, usage);
             parsed.model = qualified.modelSlug;
           } else {
@@ -213,7 +214,11 @@ async function selectGatewayAccount(active, usageReader, { force = false, exclud
     .filter((account, index, list) => !exclude.has(account.id) && list.findIndex(item => item.id === account.id) === index);
   const healthy = [];
   for (const account of candidates) {
-    const usage = await readUsageSafely(usageReader, account, { force });
+    let usage = await readUsageSafely(usageReader, account, { force });
+    // Usage is advisory telemetry and can briefly lag behind the real
+    // allowance. Never turn one cached snapshot into a hard 429 without a
+    // fresh read first.
+    if (!force && !usageIsHealthy(usage)) usage = await readUsageSafely(usageReader, account, { force: true });
     if (usageIsHealthy(usage)) {
       healthy.push({ account, usage, score: accountHeadroomScore(usage) });
     }
@@ -241,7 +246,7 @@ function accountHeadroomScore(usage) {
 }
 
 function usageIsHealthy(usage) {
-  if (!usage || usage.status === 'cooldown' || usage.allowed === false) return false;
+  if (!usage || usage.status === 'cooldown') return false;
   const remaining = [usage.primary?.remainingPercent, usage.secondary?.remainingPercent, usage.spendControl?.remainingPercent]
     .filter(value => Number.isFinite(value));
   return !remaining.some(value => value <= LOW_USAGE_REMAINING_PERCENT);

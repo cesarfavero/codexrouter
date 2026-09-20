@@ -66,7 +66,6 @@ export function normalizeUsagePayload(payload) {
     : [];
 
   const explicitLimitReached = rateLimit?.limit_reached === true
-    || rateLimit?.allowed === false
     || spendControl?.reached === true;
   const allowed = booleanOrNull(rateLimit?.allowed);
   const status = explicitLimitReached ? 'cooldown' : allowed === true ? 'available' : 'unknown';
