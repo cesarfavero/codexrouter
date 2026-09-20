@@ -369,3 +369,38 @@ test('gateway rolls over when the active account is nearly exhausted', async () 
     state.restore();
   }
 });
+
+test('gateway still routes an account with a low but non-zero weekly window', async () => {
+  const state = await fixture();
+  let upstreamCalls = 0;
+  const upstream = http.createServer((_req, res) => {
+    upstreamCalls += 1;
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end('data: [DONE]\n\n');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({
+    port: 0,
+    upstreamBase: `http://127.0.0.1:${upstream.address().port}`,
+    usageReader: async () => ({
+      status: 'available',
+      primary: { remainingPercent: 85 },
+      secondary: { remainingPercent: 8 },
+    }),
+  });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(upstreamCalls, 1);
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+    state.restore();
+  }
+});

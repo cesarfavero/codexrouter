@@ -14,7 +14,6 @@ const HOP_BY_HOP = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te',
   'trailer', 'transfer-encoding', 'upgrade', 'host', 'content-length',
 ]);
-const LOW_USAGE_REMAINING_PERCENT = Number(process.env.CODEXROUTER_LOW_USAGE_REMAINING_PERCENT || 10);
 const MAX_DECODED_REQUEST_BYTES = 128 * 1024 * 1024;
 
 export function startRouter({
@@ -249,7 +248,9 @@ function usageIsHealthy(usage) {
   if (!usage || usage.status === 'cooldown') return false;
   const remaining = [usage.primary?.remainingPercent, usage.secondary?.remainingPercent, usage.spendControl?.remainingPercent]
     .filter(value => Number.isFinite(value));
-  return !remaining.some(value => value <= LOW_USAGE_REMAINING_PERCENT);
+  // A low window is still usable. Only an actually exhausted window should
+  // remove an account before the upstream request has a chance to decide.
+  return !remaining.some(value => value <= 0);
 }
 
 function cooldownError(account, usage) {
@@ -257,7 +258,11 @@ function cooldownError(account, usage) {
     ? new Date(usage.cooldownUntil * 1000).toISOString()
     : null;
   const suffix = reset ? ` until ${reset}` : '';
-  const error = httpError(429, `The active account “${account.label}” is in cooldown${suffix}. Select another account explicitly in CodexRouter or wait for this account to reset.`);
+  const isCooldown = usage?.status === 'cooldown' || usage?.limitReached === true;
+  const message = isCooldown
+    ? `The active account “${account.label}” is in cooldown${suffix}. Select another account explicitly in CodexRouter or wait for this account to reset.`
+    : `No configured account currently has a confirmed available quota. The latest usage telemetry for “${account.label}” was inconclusive; retry the request or refresh the account session.`;
+  const error = httpError(429, message);
   error.type = 'usage_limit_reached';
   error.cooldownUntil = usage.cooldownUntil ?? null;
   return error;
