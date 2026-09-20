@@ -5,14 +5,20 @@ const CACHE_TTL_MS = Number(process.env.CODEXROUTER_USAGE_CACHE_MS || 60_000);
 const cache = new Map();
 
 export async function getAccountUsage(account, { force = false, fetchImpl = fetch } = {}) {
-  const cached = cache.get(account.id);
+  let auth = freshAuth(account.codexHome);
+  // The local registry id identifies a profile, not the ChatGPT subscription
+  // currently logged into that profile. Include the upstream account identity
+  // in the cache key so logout/login outside CodexRouter cannot reuse another
+  // subscription's quota snapshot.
+  const cacheKey = `${account.id}:${auth.accountId || 'unknown'}:${auth.expiresAt || 'unknown'}`;
+  const cached = cache.get(cacheKey);
   if (!force && cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) return cached.value;
 
-  let auth = freshAuth(account.codexHome);
   let response = await requestUsage(auth, fetchImpl);
   if (response.status === 401) {
     auth = freshAuth(account.codexHome, { force: true });
     response = await requestUsage(auth, fetchImpl);
+    cache.delete(cacheKey);
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
@@ -20,12 +26,15 @@ export async function getAccountUsage(account, { force = false, fetchImpl = fetc
   }
 
   const value = normalizeUsagePayload(await response.json());
-  cache.set(account.id, { cachedAt: Date.now(), value });
+  const finalCacheKey = `${account.id}:${auth.accountId || 'unknown'}:${auth.expiresAt || 'unknown'}`;
+  cache.set(finalCacheKey, { cachedAt: Date.now(), value });
   return value;
 }
 
 export function invalidateAccountUsage(accountId) {
-  cache.delete(accountId);
+  for (const key of cache.keys()) {
+    if (key.startsWith(`${accountId}:`)) cache.delete(key);
+  }
 }
 
 async function requestUsage(auth, fetchImpl) {

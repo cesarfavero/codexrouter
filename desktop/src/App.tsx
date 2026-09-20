@@ -3,7 +3,7 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Icon, type IconName } from './icons';
-import type { AccountSummary, LauncherEvent, LogRecord, Operation, Snapshot } from './types';
+import type { AccountSummary, AccountUsage, LauncherEvent, LogRecord, Operation, Snapshot } from './types';
 
 const api = window.codexRouter;
 type Surface = 'overview' | 'accounts' | 'setup' | 'activity' | 'settings' | 'account-detail';
@@ -180,11 +180,9 @@ function AccountRow({ account, onToggle, onReauth, onRemove, onOpen }: {
   onOpen: () => void;
 }) {
   const cooldown = account.usage?.status === 'cooldown';
-  const statusTone = !account.connected ? 'error' : cooldown ? 'warning' : 'success';
-  const statusText = !account.connected ? 'Needs login' : cooldown ? `Cooldown${account.usage?.cooldownUntil ? ` · ${formatReset(account.usage.cooldownUntil)}` : ''}` : account.isActive ? 'Active' : 'Ready';
-  const remaining = account.usage?.primary?.remainingPercent;
-  const usageValue = remaining == null ? '—' : `${Math.round(remaining)}%`;
-  const usageCaption = account.usageError ? 'usage unavailable' : cooldown ? 'until reset' : 'remaining';
+  const statusTone = !account.connected ? 'error' : !account.enabled ? 'neutral' : cooldown ? 'warning' : account.usage?.status === 'unknown' ? 'neutral' : 'success';
+  const statusText = !account.connected ? 'Needs login' : !account.enabled ? 'Disabled' : cooldown ? 'Cooldown' : account.usage?.status === 'unknown' ? 'Usage unknown' : account.isActive ? 'Active' : 'Ready';
+  const usage = account.usage;
 
   return (
     <div className="account-row" onClick={onOpen} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') onOpen(); }} role="button" tabIndex={0}>
@@ -197,7 +195,10 @@ function AccountRow({ account, onToggle, onReauth, onRemove, onOpen }: {
         </div>
           <span>{account.email || 'Email becomes available after login'}{account.preferredModel ? ` · ${account.preferredModel}` : ''}{account.preferredEffort ? ` · ${account.preferredEffort} effort` : ''}</span>
       </div>
-      <div className="account-models"><strong>{usageValue}</strong><span>{usageCaption}</span></div>
+      <div className="account-quota-summary" aria-label="Quota summary">
+        <span><b>5h</b>{formatRemaining(usage?.primary?.remainingPercent)}<small>{formatReset(usage?.primary?.resetsAt)}</small></span>
+        <span><b>Week</b>{formatRemaining(usage?.secondary?.remainingPercent)}<small>{formatReset(usage?.secondary?.resetsAt)}</small></span>
+      </div>
       <div className="account-status"><StatusDot tone={statusTone} /><span>{statusText}</span></div>
       <div className="account-actions" onClick={event => event.stopPropagation()}>
         <Toggle checked={account.enabled} onChange={onToggle} label={`${account.enabled ? 'Disable' : 'Enable'} ${account.label} for gateway`} />
@@ -247,23 +248,29 @@ function AccountDetailSurface({ account, logs, onBack }: { account: AccountSumma
   return <>
     <button className="back-link" onClick={onBack} type="button">← Overview</button>
     <SurfaceHeader eyebrow="Account detail" title={account.label} body={`${account.email || 'Connected account'} · ${account.plan || 'Codex plan'} · ${account.preferredModel || 'No default model'}`} actions={<span className="detail-status"><StatusDot tone={account.connected ? 'success' : 'error'} />{account.connected ? 'Connected' : 'Needs login'}</span>} />
-    <div className="detail-metrics"><Metric label="Requests" value={String(requestCount)} /><Metric label="Tokens reported" value={tokens ? formatNumber(tokens) : 'Awaiting data'} /><Metric label="5-hour window" value={primary == null ? 'Unknown' : `${Math.round(primary)}% left`} /><Metric label="Weekly window" value={secondary == null ? 'Unknown' : `${Math.round(secondary)}% left`} /></div>
-    <div className="quota-panel"><PanelHeading title="Quota windows" action={`Checked ${account.usage?.checkedAt ? new Date(account.usage.checkedAt).toLocaleTimeString() : 'not yet'}`} /><QuotaLine label="5-hour limit" value={primary} /><QuotaLine label="Weekly limit" value={secondary} /><QuotaLine label="Spend control" value={account.usage?.spendControl?.remainingPercent ?? null} /></div>
+    <div className="detail-metrics"><Metric label="Requests" value={String(requestCount)} /><Metric label="Tokens reported" value={tokens ? formatNumber(tokens) : 'Awaiting data'} /><Metric label="5-hour window" value={formatRemaining(primary, ' left')} /><Metric label="Weekly window" value={formatRemaining(secondary, ' left')} /></div>
+    <div className="quota-panel"><PanelHeading title="Quota windows" action={`Checked ${account.usage?.checkedAt ? new Date(account.usage.checkedAt).toLocaleTimeString() : 'not yet'}`} /><QuotaLine label="5-hour limit" window={account.usage?.primary} /><QuotaLine label="Weekly limit" window={account.usage?.secondary} /><QuotaLine label="Spend control" value={account.usage?.spendControl?.remainingPercent ?? null} resetAt={account.usage?.spendControl?.resetsAt} /><div className="quota-state"><StatusDot tone={account.usage?.status === 'cooldown' ? 'warning' : account.usage?.status === 'available' ? 'success' : 'neutral'} /><span>{account.enabled ? (account.usage?.status === 'cooldown' ? `Cooldown until ${formatReset(account.usage.cooldownUntil)}` : account.usage?.status === 'available' ? 'Available for routing' : account.usageError || 'Waiting for usage data') : 'Disabled for gateway routing'}</span></div></div>
     <div className="detail-grid"><div className="overview-panel model-rank"><PanelHeading title="Models used" action="This session" />{models.length ? models.map(([model, count], index) => <div className="rank-row" key={model}><span className="rank-index">0{index + 1}</span><span>{model}</span><strong>{count}</strong><div className="rank-track"><i style={{ width: `${Math.max(12, count / models[0][1] * 100)}%` }} /></div></div>) : <EmptyInline title="No model traffic yet" body="Model distribution appears after this account handles requests." />}</div><div className="overview-panel recent-panel"><PanelHeading title="Requests handled" action={`${requestCount} total`} />{events.length ? events.slice(-12).reverse().map(log => <div className="recent-row" key={log.id}><span className={`log-dot ${log.level}`} /><time>{new Date(log.at).toLocaleTimeString()}</time><strong>{String((log.details as { model?: string }).model || 'unknown')}</strong><span>{String((log.details as { transport?: string }).transport || 'http')}</span><em>{Number((log.details as { status?: number }).status) || '—'}</em></div>) : <EmptyInline title="No requests for this account" body="The Router will show model and request details here." />}</div></div>
   </>;
 }
 
 function PanelHeading({ title, action }: { title: string; action?: ReactNode }) { return <div className="panel-heading"><strong>{title}</strong>{typeof action === 'string' ? <span>{action}</span> : action}</div>; }
 function EmptyInline({ title, body }: { title: string; body: string }) { return <div className="empty-inline"><strong>{title}</strong><span>{body}</span></div>; }
-function QuotaLine({ label, value }: { label: string; value: number | null | undefined }) { const visible = value == null ? null : Math.max(0, Math.min(100, value)); return <div className="quota-line"><span>{label}</span><div className="quota-track"><i style={{ width: `${visible ?? 0}%` }} /></div><strong>{visible == null ? 'Unknown' : `${Math.round(visible)}% left`}</strong></div>; }
+function QuotaLine({ label, value, window, resetAt }: { label: string; value?: number | null; window?: AccountUsage['primary']; resetAt?: number | null }) { const actual = window?.remainingPercent ?? value; const visible = actual == null ? null : Math.max(0, Math.min(100, actual)); const reset = window?.resetsAt ?? resetAt; return <div className="quota-line"><span>{label}<small>{reset ? `resets ${formatReset(reset)}` : 'reset unknown'}</small></span><div className="quota-track"><i style={{ width: `${visible ?? 0}%` }} /></div><strong>{visible == null ? 'Unknown' : `${Math.round(visible)}% left`}</strong></div>; }
 function formatNumber(value: number) { return new Intl.NumberFormat(undefined, { notation: value > 99999 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value); }
+function formatRemaining(value: number | null | undefined, suffix = '') { return value == null ? '—' : `${Math.round(value)}%${suffix}`; }
 function uniqueRequestLogs(logs: LogRecord[]) {
   const byRequest = new Map<string, LogRecord>();
   for (const log of logs) {
     const details = log.details as { requestId?: string } | undefined;
     if (!details?.requestId) continue;
     const current = byRequest.get(details.requestId);
-    if (!current || Boolean((details as { usageOnly?: boolean }).usageOnly)) byRequest.set(details.requestId, log);
+    if (!current) byRequest.set(details.requestId, log);
+    else if (Boolean((details as { usageOnly?: boolean }).usageOnly)) {
+      // The usage event arrives after the response event. Merge it so token
+      // telemetry cannot replace the request metadata or vice versa.
+      byRequest.set(details.requestId, { ...current, details: { ...(current.details as object), ...details } });
+    }
   }
   return [...byRequest.values()];
 }
@@ -461,7 +468,7 @@ function LoadingState() { return <div className="center-state"><BrandMark/><div 
 function FatalState({ title, body }: { title: string; body: string }) { return <div className="center-state"><h1>{title}</h1><p>{body}</p></div>; }
 function formatPlan(plan: string) { const normalized = String(plan).replace(/[_-]+/g, ' '); return normalized.replace(/\b\w/g, char => char.toUpperCase()); }
 function initials(value: string) { return value.trim().split(/\s+/).slice(0, 2).map(part => part[0]?.toUpperCase()).join('') || 'A'; }
-function formatReset(seconds: number) { return new Date(seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+function formatReset(seconds: number | null | undefined) { if (!seconds) return 'reset unknown'; return new Date(seconds * 1000).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }); }
 function loginStateLabel(state?: string) { if (state === 'reusing-session') return 'Reusing your existing Codex session…'; if (state === 'starting') return 'Starting Codex login…'; if (state === 'waiting-for-browser') return 'Waiting for browser authentication…'; if (state === 'authenticated') return 'Authentication complete'; return 'Waiting for Codex…'; }
 function messageOf(error: unknown) { return error instanceof Error ? error.message : String(error); }
 async function run(work: () => Promise<unknown>, setError: (message: string | null) => void) { setError(null); try { await work(); } catch (cause) { setError(messageOf(cause)); } }

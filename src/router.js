@@ -328,8 +328,10 @@ async function inspectUsage(stream) {
 }
 
 function parseUsageLine(line) {
-  if (!line.startsWith('data:')) return null;
-  try { return findUsage(JSON.parse(line.slice(5).trim())); } catch { return null; }
+  const text = String(line || '').trim();
+  if (!text || text === '[DONE]' || text.startsWith('event:')) return null;
+  const payload = text.startsWith('data:') ? text.slice(5).trim() : text;
+  try { return findUsage(JSON.parse(payload)); } catch { return null; }
 }
 
 function findUsage(value, depth = 0) {
