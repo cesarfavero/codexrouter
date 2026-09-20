@@ -303,7 +303,7 @@ test('gateway refreshes stale cooldown telemetry before rejecting a usable accou
   }
 });
 
-test('gateway selects the healthy account with the most quota headroom', async () => {
+test('gateway prioritizes five-hour quota when ranking healthy accounts', async () => {
   const state = await fixture();
   const upstream = http.createServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -326,7 +326,7 @@ test('gateway selects the healthy account with the most quota headroom', async (
     });
     assert.equal(response.status, 200);
     await response.text();
-    assert.equal((await import('../src/store.js')).defaultAccount().id, 'eduardo');
+    assert.equal((await import('../src/store.js')).defaultAccount().id, 'cesar');
   } finally {
     await new Promise(resolve => router.close(resolve));
     await new Promise(resolve => upstream.close(resolve));
