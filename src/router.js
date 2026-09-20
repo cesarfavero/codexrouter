@@ -15,6 +15,7 @@ const HOP_BY_HOP = new Set([
   'trailer', 'transfer-encoding', 'upgrade', 'host', 'content-length',
 ]);
 const MAX_DECODED_REQUEST_BYTES = 128 * 1024 * 1024;
+const HEADROOM_TIE_MARGIN = 5;
 
 export function startRouter({
   port = 17842,
@@ -219,13 +220,27 @@ async function selectGatewayAccount(active, usageReader, { force = false, exclud
     // fresh read first.
     if (!force && !usageIsHealthy(usage)) usage = await readUsageSafely(usageReader, account, { force: true });
     if (usageIsHealthy(usage)) {
-      healthy.push({ account, usage, score: accountHeadroomScore(usage) });
+      healthy.push({
+        account,
+        usage,
+        score: accountHeadroomScore(usage),
+        hasHeadroom: [usage.primary?.remainingPercent, usage.secondary?.remainingPercent, usage.spendControl?.remainingPercent]
+          .some(value => Number.isFinite(value)),
+      });
     }
   }
   if (healthy.length) {
     healthy.sort((left, right) => {
-      if (right.score !== left.score) return right.score - left.score;
-      return left.account.id === active.id ? -1 : right.account.id === active.id ? 1 : 0;
+      const scoreDelta = right.score - left.score;
+      if (Math.abs(scoreDelta) > HEADROOM_TIE_MARGIN) return scoreDelta;
+      if (!left.hasHeadroom && !right.hasHeadroom) {
+        return left.account.id === active.id ? -1 : right.account.id === active.id ? 1 : 0;
+      }
+      // When accounts have comparable headroom, rotate away from the current
+      // default so equal-capacity subscriptions share the workload.
+      if (left.account.id === active.id) return 1;
+      if (right.account.id === active.id) return -1;
+      return left.account.id.localeCompare(right.account.id);
     });
     const selected = healthy[0].account;
     if (selected.id !== active.id) setDefaultAccount(selected.id);
