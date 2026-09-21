@@ -149,7 +149,7 @@ export function createJevAdvisor({ config = jevConfigFromEnv(), fetchImpl = fetc
 }
 
 export function resolveJevRouting(account, request, decision, { mode = 'off', minConfidence = 0.78 } = {}) {
-  if (!decision || decision.status !== 'ok') return { applicable: false, reason: decision?.status || 'no-decision' };
+  if (!decision || decision.status !== 'ok') return { mode, applicable: false, reason: decision?.status || 'no-decision' };
   let tier = TIERS.has(decision.routeTier) ? decision.routeTier : 'balanced';
   if ((decision.failureSignal ?? 0) >= 0.8 || (decision.semanticRisk ?? 0) >= 2.4) tier = bumpTier(tier);
 
@@ -162,6 +162,7 @@ export function resolveJevRouting(account, request, decision, { mode = 'off', mi
   const active = mode === 'active' && !manipulationSuspected;
 
   return {
+    mode,
     applicable: Boolean(recommendedModel || recommendedEffort),
     tier,
     recommendedModel,
@@ -209,6 +210,7 @@ export function sanitizeJevText(value) {
 export function summarizeJevDecision(decision, routing = null) {
   if (!decision) return null;
   return {
+    mode: routing?.mode ?? null,
     status: decision.status,
     model: decision.model ?? null,
     latencyMs: decision.latencyMs ?? null,
