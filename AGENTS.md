@@ -38,5 +38,6 @@ For repository work, create/link an Issue, use a branch, make focused commits, o
 - Never send access tokens, refresh tokens, cookies, raw `auth.json`, account-authentication headers or other known credentials to TypeSafe.
 - Never log the task text sent to Jev. Operational telemetry may contain only structured decisions, latency, token counts and applied/recommended routing metadata.
 - Any Jev outage, timeout, malformed answer, budget limit or low-confidence result must fall back to the deterministic Router behavior.
+- Treat evaluator-manipulation/prompt-injection signals as a reason to keep the recommendation observational; suspicious state must not gain autonomous routing authority.
 - Changes to Jev questions, thresholds, model-tier mapping, sanitization or egress state require tests covering `off`, `observe`, `active`, explicit-model bypass and failure fallback.
 - Keep the pinned Jev model/configuration explicit so benchmark comparisons remain reproducible; do not silently switch to a moving alias for measured rollouts.
