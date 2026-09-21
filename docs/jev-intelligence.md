@@ -37,6 +37,8 @@ official Codex upstream
 
 Only requests whose model is exactly `codexrouter/gateway` are eligible for Jev routing. Explicit native model requests and account-qualified model requests stay authoritative and bypass the semantic advisor.
 
+CodexRouter therefore manages `model = "codexrouter/gateway"` as the default model in the main Codex config while the integration is installed. The previous native model line is journaled and restored on uninstall. Upgrades from older CodexRouter journals are repaired automatically when Jev is enabled or the runtime starts. Explicit model choices made per request/session still bypass Jev.
+
 ## Modes
 
 ### off
@@ -89,7 +91,7 @@ On systems where secure OS encryption is unavailable, CodexRouter refuses to per
 | `TYPESAFE_BASE_URL` | `https://api.typesafe.ai` | TypeSafe API base URL. |
 | `CODEXROUTER_JEV_MODE` | `off` | `off`, `observe` or `active`. |
 | `CODEXROUTER_JEV_MODEL` | `jev-1.13.0` | Pinned Jev model used for reproducible measurements. Override explicitly when upgrading. |
-| `CODEXROUTER_JEV_TIMEOUT_MS` | `900` | Per-decision timeout. |
+| `CODEXROUTER_JEV_TIMEOUT_MS` | `3000` | Per-decision timeout. Jev failure remains fail-open. |
 | `CODEXROUTER_JEV_MIN_CONFIDENCE` | `0.78` | Minimum confidence before active model/effort application. |
 | `CODEXROUTER_JEV_MAX_CHARS` | `12000` | Maximum sanitized task characters transmitted. |
 | `CODEXROUTER_JEV_SAMPLE_RATE` | `1` | Fraction from 0 to 1 of eligible gateway requests sampled. |
