@@ -361,6 +361,7 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
   const [jevMode, setJevMode] = useState<'off' | 'observe' | 'active'>(snapshot.jev.mode);
   const [jevModel, setJevModel] = useState(snapshot.jev.model);
   const [jevConfidence, setJevConfidence] = useState(snapshot.jev.minConfidence);
+  const [jevAllowedModels, setJevAllowedModels] = useState<string[] | null>(snapshot.jev.allowedModels);
   const [jevKey, setJevKey] = useState('');
   const [jevSaving, setJevSaving] = useState(false);
 
@@ -373,8 +374,9 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
     setJevMode(snapshot.jev.mode);
     setJevModel(snapshot.jev.model);
     setJevConfidence(snapshot.jev.minConfidence);
+    setJevAllowedModels(snapshot.jev.allowedModels);
     setJevKey('');
-  }, [snapshot.jev.mode, snapshot.jev.model, snapshot.jev.minConfidence, snapshot.jev.keySource]);
+  }, [snapshot.jev.mode, snapshot.jev.model, snapshot.jev.minConfidence, snapshot.jev.allowedModels, snapshot.jev.keySource]);
 
   const savePreferences = async () => {
     if (!active || saving) return;
@@ -392,6 +394,7 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
         mode: jevMode,
         model: jevModel.trim(),
         minConfidence: jevConfidence,
+        allowedModels: jevAllowedModels,
         ...(jevKey.trim() ? { apiKey: jevKey.trim() } : {}),
         ...(options.clearApiKey ? { clearApiKey: true } : {}),
       });
@@ -401,10 +404,23 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
     finally { setJevSaving(false); }
   };
 
+  const normalizedJevAllowedModels = jevAllowedModels === null ? null : [...jevAllowedModels].sort();
+  const savedJevAllowedModels = snapshot.jev.allowedModels === null ? null : [...snapshot.jev.allowedModels].sort();
   const jevChanged = jevMode !== snapshot.jev.mode
     || jevModel.trim() !== snapshot.jev.model
     || jevConfidence !== snapshot.jev.minConfidence
+    || JSON.stringify(normalizedJevAllowedModels) !== JSON.stringify(savedJevAllowedModels)
     || Boolean(jevKey.trim());
+
+  const jevModelAllowed = (slug: string) => jevAllowedModels === null || jevAllowedModels.includes(slug);
+  const setJevModelAllowed = (slug: string, allowed: boolean) => {
+    setJevAllowedModels(current => {
+      const baseline = current === null ? availableModels.map(item => item.slug) : current;
+      return allowed
+        ? [...new Set([...baseline, slug])]
+        : baseline.filter(item => item !== slug);
+    });
+  };
 
   const keyStatus = snapshot.jev.keySource === 'secure-storage'
     ? 'Stored with OS encryption'
@@ -449,6 +465,21 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
         </SettingRow>
         <SettingRow title="Jev confidence gate" description="Active mode changes model or effort only when the corresponding typed decision meets this threshold.">
           <input aria-label="Jev minimum confidence" disabled={jevSaving} max={1} min={0} onChange={event => setJevConfidence(Number(event.target.value))} step={0.01} type="number" value={jevConfidence} />
+        </SettingRow>
+        <SettingRow title="Models Jev may use" description="Hard allowlist applied after Jev chooses a tier. Disabled models can never be selected by Jev; explicit manual model choices are unaffected.">
+          <div className="jev-model-policy">
+            <div className="jev-model-policy-actions">
+              <SecondaryButton disabled={jevSaving || jevAllowedModels === null} onClick={() => setJevAllowedModels(null)}>Allow all</SecondaryButton>
+              <SecondaryButton disabled={jevSaving || jevAllowedModels?.length === 0} onClick={() => setJevAllowedModels([])}>Disable all</SecondaryButton>
+            </div>
+            {availableModels.length ? availableModels.map(item => (
+              <div className="jev-model-policy-row" key={item.slug}>
+                <span><strong>{item.name}</strong><code>{item.slug}</code></span>
+                <Toggle checked={jevModelAllowed(item.slug)} disabled={jevSaving} label={`Allow Jev to use ${item.name}`} onChange={checked => setJevModelAllowed(item.slug, checked)} />
+              </div>
+            )) : <span className="value-text">Refresh the active account catalog to configure model eligibility.</span>}
+            <small>{jevAllowedModels === null ? 'All current and future discovered models are eligible.' : `${jevAllowedModels.length} model(s) explicitly eligible.`}</small>
+          </div>
         </SettingRow>
         <div className="settings-save"><PrimaryButton disabled={jevSaving || !jevChanged || !jevModel.trim()} onClick={() => void saveJev()}>{jevSaving ? 'Saving…' : 'Save Jev settings'}</PrimaryButton></div>
 
