@@ -140,6 +140,13 @@ code { font-family: var(--font-mono); font-size: 12px; }
 .setting-value { display: flex; align-items: center; justify-content: flex-end; color: var(--color-text-secondary); }
 .setting-value select { max-width: 290px; min-height: 34px; padding: 0 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-background-control); color: var(--color-text-primary); font-size: 11px; }
 .settings-save { display: flex; justify-content: flex-end; padding: 14px 0 4px; }
+.jev-model-policy { width: min(460px, 52vw); display: grid; gap: 8px; padding: 10px 0; }
+.jev-model-policy-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.jev-model-policy-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; min-height: 42px; padding: 6px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-background-control); }
+.jev-model-policy-row > span { min-width: 0; display: grid; gap: 2px; }
+.jev-model-policy-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jev-model-policy-row code { overflow: hidden; color: var(--color-text-tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.jev-model-policy > small { color: var(--color-text-tertiary); font-size: 10px; text-align: right; }
 .update-banner { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; padding: 10px 12px; border: 1px solid var(--color-border-focus); border-radius: var(--radius-sm); background: var(--color-background-control-active); color: var(--color-text-primary); font-size: 12px; }
 .update-banner span { flex: 1; }
 .update-banner button { border: 0; background: transparent; color: var(--color-text-accent); cursor: pointer; font-size: 11px; font-weight: 600; }
