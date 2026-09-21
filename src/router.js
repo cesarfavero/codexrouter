@@ -9,7 +9,7 @@ import { allAccounts, defaultAccount, setDefaultAccount } from './store.js';
 import { catalogPath, mainCodexHome } from './paths.js';
 import { readJson } from './fs-util.js';
 import { getAccountUsage } from './usage.js';
-import { createJevAdvisor, selectModelForTier, summarizeJevDecision } from './jev.js';
+import { createJevAdvisor, summarizeJevDecision } from './jev.js';
 
 const HOP_BY_HOP = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te',
@@ -122,10 +122,14 @@ export function startRouter({
         if (fallback && fallback.id !== account.id) {
           if (!fallback.preferredModel) throw httpError(503, `The fallback account “${fallback.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);
           account = fallback;
-          const fallbackModel = jevAdvisor?.mode === 'active' && jevRouting?.tier
-            ? selectModelForTier(account, jevRouting.tier)
+          const fallbackRequest = JSON.parse(body.toString('utf8'));
+          const fallbackRouting = jevAdvisor?.mode === 'active' && jevDecision?.status === 'ok'
+            ? jevAdvisor.resolve?.(account, fallbackRequest, jevDecision)
+            : null;
+          const fallbackModel = fallbackRouting?.applyModel && fallbackRouting.recommendedModel
+            ? fallbackRouting.recommendedModel
             : account.preferredModel;
-          body = Buffer.from(JSON.stringify({ ...JSON.parse(body.toString('utf8')), model: fallbackModel || account.preferredModel }));
+          body = Buffer.from(JSON.stringify({ ...fallbackRequest, model: fallbackModel || account.preferredModel }));
           upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: false, decodedRequestBody });
           attempts.push(await describeAttempt(upstream, account, 'account-failover'));
         }

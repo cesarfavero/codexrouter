@@ -338,6 +338,79 @@ test('gateway automatically rolls over from a cooldown account', async () => {
   }
 });
 
+test('gateway re-resolves Jev model policy for a fallback account after 429', async () => {
+  const state = await fixture();
+  const seen = [];
+  const resolvedAccounts = [];
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    seen.push({
+      account: req.headers['chatgpt-account-id'],
+      model: JSON.parse(Buffer.concat(chunks).toString('utf8')).model,
+    });
+    if (seen.length === 1) {
+      res.writeHead(429, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { message: 'quota' } }));
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end('data: [DONE]\n\n');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+
+  const jevDecision = {
+    status: 'ok',
+    routeTier: 'deep',
+    routeConfidence: 0.99,
+    reasoningEffort: 'high',
+    effortConfidence: 0.99,
+  };
+  const jevAdvisor = {
+    mode: 'active',
+    status: () => ({ mode: 'active', configured: true }),
+    advise: async () => jevDecision,
+    resolve: account => {
+      resolvedAccounts.push(account.id);
+      return {
+        mode: 'active',
+        tier: 'deep',
+        applyModel: true,
+        applyEffort: false,
+        recommendedModel: account.id === 'eduardo' ? 'gpt-5.6-sol' : 'gpt-5.6-luna',
+      };
+    },
+  };
+
+  const router = startRouter({
+    port: 0,
+    upstreamBase: `http://127.0.0.1:${upstream.address().port}`,
+    usageReader: async () => ({ status: 'available' }),
+    jevAdvisor,
+  });
+  await once(router, 'listening');
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: 'hard task' }),
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.deepEqual(resolvedAccounts, ['eduardo', 'cesar']);
+    assert.deepEqual(seen, [
+      { account: 'acct-eduardo', model: 'gpt-5.6-sol' },
+      { account: 'acct-cesar', model: 'gpt-5.6-luna' },
+    ]);
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+    state.restore();
+  }
+});
+
 test('gateway refreshes stale cooldown telemetry before rejecting a usable account', async () => {
   const state = await fixture();
   let upstreamCalls = 0;

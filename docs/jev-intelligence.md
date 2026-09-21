@@ -74,7 +74,8 @@ The packaged desktop app exposes the same controls under **Settings**:
 - Jev mode: off, observe, or active;
 - TypeSafe API key;
 - pinned Jev model;
-- minimum confidence gate.
+- minimum confidence gate;
+- hard per-model eligibility toggles for Jev routing.
 
 When a key is entered in the desktop app, the main Electron process encrypts it with Electron `safeStorage` before writing it under the CodexRouter data directory. The renderer only receives whether a key is configured and whether it came from secure storage or the environment; it cannot read the secret back.
 
@@ -94,6 +95,7 @@ On systems where secure OS encryption is unavailable, CodexRouter refuses to per
 | `CODEXROUTER_JEV_SAMPLE_RATE` | `1` | Fraction from 0 to 1 of eligible gateway requests sampled. |
 | `CODEXROUTER_JEV_CACHE_TTL_MS` | `300000` | In-memory decision-cache TTL. |
 | `CODEXROUTER_JEV_MAX_RPM` | `60` | Maximum Jev decisions per process per rolling minute. |
+| `CODEXROUTER_JEV_ALLOWED_MODELS` | unset | Optional comma-separated hard allowlist of native model slugs Jev may select. Unset means all discovered models are eligible; an explicitly empty value means no model override is eligible. |
 
 The pinned default exists to keep experiments comparable. A deployment can move to another Jev version through `CODEXROUTER_JEV_MODEL` without changing code.
 
@@ -119,6 +121,10 @@ Jev chooses an abstract tier, not an arbitrary model slug. CodexRouter maps that
 - `deep`: prefer the strongest available family member such as Sol.
 
 The exact model is always constrained to the selected account's catalog. If Jev reports a strong prior-failure signal or high semantic risk, the Router can raise the recommendation by one tier before applying the confidence gate.
+
+A user-configured model allowlist is applied after tier selection as a hard constraint. For example, if Jev requests `deep` but Sol is disabled and Terra is enabled, the Router selects Terra. If no allowed model exists for the selected account, Jev does not override the model at all; normal deterministic routing continues. The same policy is re-resolved for a fallback account after a 429 rather than carrying an ineligible model choice across accounts.
+
+In the desktop UI, **Allow all** stores an unrestricted policy so newly discovered future models are eligible automatically. **Disable all** stores an empty allowlist, which disables Jev model overrides while leaving other Jev signals such as reasoning-effort advice available.
 
 This does not give Jev authority over which subscription can be used. Account selection and quota headroom remain deterministic.
 
