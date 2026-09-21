@@ -27,6 +27,7 @@ export function startRouter({
   jevAdvisor = createJevAdvisor(),
   onRequest = null,
 } = {}) {
+  const upgradedSockets = new Set();
   const server = http.createServer(async (req, res) => {
     const requestId = crypto.randomUUID();
     const startedAt = Date.now();
@@ -156,6 +157,10 @@ export function startRouter({
     }
   });
   server.on('upgrade', (req, socket) => {
+    upgradedSockets.add(socket);
+    const forgetSocket = () => upgradedSockets.delete(socket);
+    socket.once('close', forgetSocket);
+    socket.once('error', forgetSocket);
     const requestId = crypto.randomUUID();
     void proxyOfficialUpgrade({ req, socket, officialBase: officialUpstreamBase })
       .then(() => emitRequest(onRequest, { requestId, account: null, endpoint: req.url?.split('?')[0] || null, model: null, status: 101, transport: 'official-websocket', method: 'GET', durationMs: 0, attempts: [] }))
@@ -164,6 +169,10 @@ export function startRouter({
         socket.destroy();
       });
   });
+  server.closeRouterConnections = () => {
+    for (const socket of upgradedSockets) socket.destroy();
+    upgradedSockets.clear();
+  };
   server.listen(port, host);
   return server;
 }
