@@ -69,7 +69,7 @@ export function jevConfigFromEnv(env = process.env) {
     configured: Boolean(apiKey),
     baseURL,
     model: String(env.CODEXROUTER_JEV_MODEL || DEFAULT_MODEL).trim() || DEFAULT_MODEL,
-    timeoutMs: numeric(env.CODEXROUTER_JEV_TIMEOUT_MS, 900, 100, 10_000),
+    timeoutMs: numeric(env.CODEXROUTER_JEV_TIMEOUT_MS, 3_000, 100, 10_000),
     minConfidence: numeric(env.CODEXROUTER_JEV_MIN_CONFIDENCE, 0.78, 0, 1),
     maxChars: Math.floor(numeric(env.CODEXROUTER_JEV_MAX_CHARS, 12_000, 1_000, 100_000)),
     sampleRate: numeric(env.CODEXROUTER_JEV_SAMPLE_RATE, 1, 0, 1),

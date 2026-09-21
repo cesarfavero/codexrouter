@@ -81,7 +81,7 @@ export CODEXROUTER_JEV_MODE=observe
 export CODEXROUTER_JEV_MODEL=jev-1.13.0
 ```
 
-`observe` records a typed recommendation without changing the routed model. `active` may apply a high-confidence model tier and reasoning effort. The desktop app also provides a hard model allowlist: disable any native model you do not want Jev to select, or disable all model overrides while still allowing Jev to advise reasoning effort. Explicit native model choices bypass Jev and remain authoritative.
+`observe` records a typed recommendation without changing the routed model. `active` may apply a high-confidence model tier and reasoning effort. When CodexRouter is installed, `codexrouter/gateway` is managed as the Codex default model so Jev-enabled requests actually enter the semantic routing path; the previous native default is preserved and restored on uninstall. The desktop app also provides a hard model allowlist: disable any native model you do not want Jev to select, or disable all model overrides while still allowing Jev to advise reasoning effort. Explicit native model choices still bypass Jev and are reported as bypasses in Activity.
 
 Enabling `observe` or `active` sends a capped and sanitized subset of task text to TypeSafe. Authentication material is not sent, and task text is not written to Router telemetry. See [Jev intelligence layer](docs/jev-intelligence.md) for the full data-flow, configuration, metrics and security boundary.
 
