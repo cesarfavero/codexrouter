@@ -452,6 +452,15 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
             <option value="active">Active</option>
           </select>
         </SettingRow>
+        <SettingRow title="Jev routing path" description="Jev only evaluates requests that enter through codexrouter/gateway. Native model selections intentionally bypass it.">
+          <span className="value-text">
+            {!snapshot.integration.installed
+              ? 'Integration not installed'
+              : snapshot.integration.gatewayDefault
+                ? 'Router gateway is the Codex default'
+                : `Bypassed by default model: ${snapshot.integration.activeModel || 'unknown'}`}
+          </span>
+        </SettingRow>
         <SettingRow title="TypeSafe API key" description={snapshot.jev.secureStorageAvailable ? 'A new key is encrypted by the operating system and never exposed back to the renderer.' : 'Secure OS storage is unavailable here. Use TYPESAFE_API_KEY instead.'}>
           <input aria-label="TypeSafe API key" autoComplete="off" disabled={!snapshot.jev.secureStorageAvailable || jevSaving} onChange={event => setJevKey(event.target.value)} placeholder={snapshot.jev.configured ? 'Configured · leave blank to keep' : 'Paste a TypeSafe API key'} spellCheck={false} type="password" value={jevKey} />
         </SettingRow>
