@@ -64,7 +64,7 @@ export type Snapshot = {
   packaged: boolean;
   accounts: AccountSummary[];
   defaultAccountId: string | null;
-  integration: { installed: boolean; port: number };
+  integration: { installed: boolean; port: number; activeModel: string | null; gatewayDefault: boolean };
   runtime: { running: boolean; port: number };
   autostart: { supported: boolean; enabled: boolean; development?: boolean };
   jev: {
