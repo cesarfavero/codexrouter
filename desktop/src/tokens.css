@@ -4,6 +4,13 @@
 :root {
   color-scheme: light;
 
+  /* Semantic accents keep the editorial base neutral while making state scannable. */
+  --color-accent: #315bea;
+  --color-success: #16834b;
+  --color-warning: #b26a00;
+  --color-error: #c62828;
+  --color-info: #5b4fd8;
+
   /* Compatibility aliases used by the component stylesheet. */
   --color-background-surface-under: var(--color-paper);
   --color-background-surface: var(--color-paper);
@@ -20,9 +27,9 @@
   --color-text-tertiary: var(--color-smoke);
   --color-text-disabled: var(--color-smoke);
   --color-text-accent: var(--color-obsidian);
-  --color-text-success: var(--color-obsidian);
-  --color-text-warning: var(--color-graphite);
-  --color-text-error: var(--color-obsidian);
+  --color-text-success: var(--color-success);
+  --color-text-warning: var(--color-warning);
+  --color-text-error: var(--color-error);
 
   --color-icon-primary: var(--color-obsidian);
   --color-icon-secondary: var(--color-graphite);
@@ -30,7 +37,7 @@
   --color-border: var(--color-hairline);
   --color-border-light: var(--color-hairline);
   --color-border-heavy: var(--color-hairline);
-  --color-border-focus: var(--color-obsidian);
+  --color-border-focus: var(--color-accent);
 
   --font-ui: var(--font-openai-sans);
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
