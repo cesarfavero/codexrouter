@@ -358,11 +358,23 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
   const [model, setModel] = useState(active?.preferredModel ?? '');
   const [effort, setEffort] = useState(active?.preferredEffort ?? 'medium');
   const [saving, setSaving] = useState(false);
+  const [jevMode, setJevMode] = useState<'off' | 'observe' | 'active'>(snapshot.jev.mode);
+  const [jevModel, setJevModel] = useState(snapshot.jev.model);
+  const [jevConfidence, setJevConfidence] = useState(snapshot.jev.minConfidence);
+  const [jevKey, setJevKey] = useState('');
+  const [jevSaving, setJevSaving] = useState(false);
 
   useEffect(() => {
     setModel(active?.preferredModel ?? '');
     setEffort(active?.preferredEffort ?? 'medium');
   }, [active?.id, active?.preferredModel, active?.preferredEffort]);
+
+  useEffect(() => {
+    setJevMode(snapshot.jev.mode);
+    setJevModel(snapshot.jev.model);
+    setJevConfidence(snapshot.jev.minConfidence);
+    setJevKey('');
+  }, [snapshot.jev.mode, snapshot.jev.model, snapshot.jev.minConfidence, snapshot.jev.keySource]);
 
   const savePreferences = async () => {
     if (!active || saving) return;
@@ -372,9 +384,37 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
     finally { setSaving(false); }
   };
 
+  const saveJev = async (options: { clearApiKey?: boolean } = {}) => {
+    if (jevSaving) return;
+    setJevSaving(true);
+    try {
+      await api!.setJevSettings({
+        mode: jevMode,
+        model: jevModel.trim(),
+        minConfidence: jevConfidence,
+        ...(jevKey.trim() ? { apiKey: jevKey.trim() } : {}),
+        ...(options.clearApiKey ? { clearApiKey: true } : {}),
+      });
+      setJevKey('');
+      await onRefresh();
+    } catch (cause) { setError(messageOf(cause)); }
+    finally { setJevSaving(false); }
+  };
+
+  const jevChanged = jevMode !== snapshot.jev.mode
+    || jevModel.trim() !== snapshot.jev.model
+    || jevConfidence !== snapshot.jev.minConfidence
+    || Boolean(jevKey.trim());
+
+  const keyStatus = snapshot.jev.keySource === 'secure-storage'
+    ? 'Stored with OS encryption'
+    : snapshot.jev.keySource === 'environment'
+      ? 'Provided by TYPESAFE_API_KEY'
+      : 'Not configured';
+
   return (
     <>
-      <SurfaceHeader eyebrow="Settings" icon="settings" title="Models and desktop behavior" body="Choose the native Codex model and default reasoning effort used by the active gateway account." />
+      <SurfaceHeader eyebrow="Settings" icon="settings" title="Models, intelligence and desktop behavior" body="Control native Codex defaults and the optional Jev semantic routing layer." />
       <div className="settings-list">
         <SettingRow title="Default native model" description={active ? 'Model used behind CodexRouter for the active account. Refresh the gateway catalog to discover new models.' : 'Connect an account first.'}>
           <select aria-label="Default native model" disabled={!active || !availableModels.length || saving} onChange={event => setModel(event.target.value)} value={model}>
@@ -388,6 +428,30 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
           </select>
         </SettingRow>
         <div className="settings-save"><PrimaryButton disabled={!active || saving || (model === (active?.preferredModel ?? '') && effort === (active?.preferredEffort ?? 'medium'))} onClick={() => void savePreferences()}> {saving ? 'Saving…' : 'Save model defaults'}</PrimaryButton></div>
+
+        <SettingRow title="Jev semantic routing" description="Off makes no external call. Observe records a shadow recommendation. Active may apply high-confidence model and effort recommendations only to the managed Router model.">
+          <select aria-label="Jev semantic routing mode" disabled={jevSaving} onChange={event => setJevMode(event.target.value as 'off' | 'observe' | 'active')} value={jevMode}>
+            <option value="off">Off</option>
+            <option value="observe">Observe</option>
+            <option value="active">Active</option>
+          </select>
+        </SettingRow>
+        <SettingRow title="TypeSafe API key" description={snapshot.jev.secureStorageAvailable ? 'A new key is encrypted by the operating system and never exposed back to the renderer.' : 'Secure OS storage is unavailable here. Use TYPESAFE_API_KEY instead.'}>
+          <input aria-label="TypeSafe API key" autoComplete="off" disabled={!snapshot.jev.secureStorageAvailable || jevSaving} onChange={event => setJevKey(event.target.value)} placeholder={snapshot.jev.configured ? 'Configured · leave blank to keep' : 'Paste a TypeSafe API key'} spellCheck={false} type="password" value={jevKey} />
+        </SettingRow>
+        <SettingRow title="Jev key status" description="The renderer receives only configuration status, never the stored secret.">
+          {snapshot.jev.keySource === 'secure-storage'
+            ? <SecondaryButton disabled={jevSaving} onClick={() => void saveJev({ clearApiKey: true })}>Clear stored key</SecondaryButton>
+            : <span className="value-text">{keyStatus}</span>}
+        </SettingRow>
+        <SettingRow title="Jev model" description="Pinned for reproducible routing measurements; change deliberately when evaluating a new Jev version.">
+          <input aria-label="Jev model" disabled={jevSaving} maxLength={120} onChange={event => setJevModel(event.target.value)} spellCheck={false} value={jevModel} />
+        </SettingRow>
+        <SettingRow title="Jev confidence gate" description="Active mode changes model or effort only when the corresponding typed decision meets this threshold.">
+          <input aria-label="Jev minimum confidence" disabled={jevSaving} max={1} min={0} onChange={event => setJevConfidence(Number(event.target.value))} step={0.01} type="number" value={jevConfidence} />
+        </SettingRow>
+        <div className="settings-save"><PrimaryButton disabled={jevSaving || !jevChanged || !jevModel.trim()} onClick={() => void saveJev()}>{jevSaving ? 'Saving…' : 'Save Jev settings'}</PrimaryButton></div>
+
         <SettingRow title="Launch at login" description={snapshot.autostart.supported ? 'Start CodexRouter hidden when you sign in to macOS.' : 'Available in the packaged desktop app.'}>
           <Toggle checked={snapshot.autostart.enabled} disabled={!snapshot.autostart.supported} onChange={async checked => { try { await api!.setAutostart(checked); await onRefresh(); } catch (cause) { setError(messageOf(cause)); } }} />
         </SettingRow>
