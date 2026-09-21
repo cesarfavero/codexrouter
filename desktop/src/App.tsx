@@ -53,8 +53,8 @@ export function App() {
   const activeAccount = snapshot.accounts.find(account => account.isActive) ?? null;
 
   return (
-    <div className="app-root">
-      <aside className="sidebar">
+    <div className={`app-root platform-${snapshot.platform}`}>
+      <aside className="sidebar draggable">
         <div className="sidebar-brand">
           <BrandMark />
           <div><strong>CodexRouter</strong><span>v{snapshot.version}</span></div>
