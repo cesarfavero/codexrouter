@@ -339,9 +339,19 @@ async function snapshot() {
 
 async function startRuntime(preferredPort) {
   if (routerServer?.listening) return snapshot();
-  const { router, jev } = await core();
+  const { router, jev, integration } = await core();
   routerPort = Number(preferredPort || DEFAULT_PORT);
-  const jevAdvisor = createDesktopJevAdvisor(jev);
+  const jevConfig = desktopJevConfig(jev);
+  if (jevConfig.mode !== 'off') {
+    const integrationState = integration.integrationStatus();
+    if (integrationState.installed && !integrationState.gatewayDefault) {
+      const repair = integration.ensureGatewayDefaultModel();
+      if (repair.changed) {
+        record('info', `Jev is ${jevConfig.mode}; repaired Codex default model to codexrouter/gateway so semantic routing can run.`);
+      }
+    }
+  }
+  const jevAdvisor = jev.createJevAdvisor({ config: jevConfig });
   let server = router.startRouter({
     port: routerPort,
     jevAdvisor,
