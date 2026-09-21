@@ -67,6 +67,19 @@ export CODEXROUTER_JEV_MODE=active
 
 A reasoning effort explicitly supplied by Codex is never overwritten by Jev.
 
+## Desktop configuration
+
+The packaged desktop app exposes the same controls under **Settings**:
+
+- Jev mode: off, observe, or active;
+- TypeSafe API key;
+- pinned Jev model;
+- minimum confidence gate.
+
+When a key is entered in the desktop app, the main Electron process encrypts it with Electron `safeStorage` before writing it under the CodexRouter data directory. The renderer only receives whether a key is configured and whether it came from secure storage or the environment; it cannot read the secret back.
+
+On systems where secure OS encryption is unavailable, CodexRouter refuses to persist a new TypeSafe key and expects `TYPESAFE_API_KEY` instead. Changing Jev settings restarts only the local Router runtime when it is already running; the Codex integration remains installed.
+
 ## Runtime configuration
 
 | Variable | Default | Purpose |
