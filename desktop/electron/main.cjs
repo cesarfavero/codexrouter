@@ -22,6 +22,7 @@ let isQuitting = false;
 let corePromise = null;
 let updateTimer = null;
 let updateInfo = null;
+let autoUpdateCapability = null;
 const logs = loadLogs();
 
 function loadLogs() {
@@ -88,8 +89,23 @@ function sendEvent(payload) {
 }
 
 async function checkForUpdates() {
-  if (!app.isPackaged) return;
+  if (!canUseAutoUpdater()) return;
   try { await autoUpdater.checkForUpdates(); } catch (error) { record('warning', `Update check failed: ${error.message}`); }
+}
+
+function canUseAutoUpdater() {
+  if (autoUpdateCapability != null) return autoUpdateCapability;
+  if (!app.isPackaged || process.platform !== 'darwin') {
+    autoUpdateCapability = Boolean(app.isPackaged);
+    return autoUpdateCapability;
+  }
+  const appBundle = path.resolve(app.getPath('exe'), '..', '..', '..');
+  const verification = spawnSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', appBundle], { encoding: 'utf8' });
+  autoUpdateCapability = verification.status === 0;
+  if (!autoUpdateCapability) {
+    record('warning', 'Automatic updates disabled because this macOS build is not signed with a valid Developer ID certificate.');
+  }
+  return autoUpdateCapability;
 }
 
 function isNewerVersion(candidate, current) {
@@ -323,11 +339,13 @@ async function authenticateAccount(account, operationName, { reuseMainSession = 
 function registerIpc() {
   ipcMain.handle('codexrouter:snapshot', () => snapshot());
   ipcMain.handle('codexrouter:update:download', async () => {
+    if (!canUseAutoUpdater()) throw new Error('Automatic updates require a signed macOS build.');
     if (!updateInfo) throw new Error('No update is available.');
     await autoUpdater.downloadUpdate();
     return { ok: true };
   });
   ipcMain.handle('codexrouter:update:install', () => {
+    if (!canUseAutoUpdater()) throw new Error('Automatic updates require a signed macOS build.');
     if (!updateInfo) throw new Error('No update is ready.');
     isQuitting = true;
     autoUpdater.quitAndInstall(false, true);
