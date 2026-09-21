@@ -17,8 +17,8 @@ code { font-family: var(--font-mono); font-size: 12px; }
 .sidebar-brand > div:last-child { display: flex; flex-direction: column; min-width: 0; }
 .sidebar-brand strong { font-size: 14px; font-weight: 500; line-height: 1; letter-spacing: -.01em; }
 .sidebar-brand span { margin-top: 5px; color: var(--color-graphite); font-size: 13px; line-height: 1; }
-.brand-mark { position: relative; width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--color-obsidian); border-radius: 50%; background: var(--color-paper); flex: 0 0 auto; }
-.brand-mark span { width: 8px; height: 8px; border-radius: 50%; background: var(--color-obsidian); }
+.brand-mark { position: relative; width: 30px; height: 30px; display: block; border: 0; border-radius: 50%; background: var(--color-paper) url('../../assets/codexrouter-icon.png') center / contain no-repeat; flex: 0 0 auto; }
+.brand-mark span { display: none; }
 
 .sidebar-nav { display: flex; align-items: center; gap: 4px; margin-left: 44px; min-width: 0; }
 .nav-group { display: flex; align-items: center; gap: 4px; margin: 0; }
@@ -73,9 +73,9 @@ code { font-family: var(--font-mono); font-size: 12px; }
 .soft-badge { color: var(--color-obsidian); background: transparent; }
 .plan-badge { color: var(--color-graphite); background: var(--color-ash); }
 .account-quota-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.account-quota-summary > span { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 5px; color: var(--color-obsidian); font-size: 14px; }
+.account-quota-summary > span { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; column-gap: 5px; color: var(--color-obsidian); font-size: 14px; }
 .account-quota-summary b { color: var(--color-graphite); font-size: 13px; font-weight: 500; }
-.account-quota-summary small { grid-column: 1 / -1; color: var(--color-smoke); font-size: 13px; white-space: nowrap; }
+.account-quota-summary small { min-width: 0; overflow: hidden; grid-column: 1 / -1; color: var(--color-smoke); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .account-status { display: flex; align-items: center; gap: 7px; color: var(--color-graphite); font-size: 14px; white-space: nowrap; }
 .account-actions { display: flex; justify-content: flex-end; gap: 4px; }
 .icon-button { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: var(--radius-full); background: transparent; color: var(--color-smoke); cursor: pointer; }

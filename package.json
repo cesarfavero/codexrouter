@@ -1,6 +1,6 @@
 {
   "name": "codexrouter",
-  "version": "0.4.36",
+  "version": "0.4.37",
   "description": "Desktop-first single-model gateway for Codex with isolated ChatGPT accounts and usage telemetry.",
   "type": "module",
   "main": "desktop/electron/main.cjs",
