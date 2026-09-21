@@ -17,14 +17,34 @@ const account = {
   ],
 };
 
-test('Jev is off by default', () => {
-  assert.equal(jevConfigFromEnv({}).mode, 'off');
+test('Jev is off by default and unrestricted unless configured', () => {
+  const config = jevConfigFromEnv({});
+  assert.equal(config.mode, 'off');
+  assert.equal(config.allowedModels, null);
+});
+
+test('Jev model allowlist parses from the environment', () => {
+  const config = jevConfigFromEnv({ CODEXROUTER_JEV_ALLOWED_MODELS: 'gpt-5.6-luna, gpt-5.6-sol, gpt-5.6-luna' });
+  assert.deepEqual(config.allowedModels, ['gpt-5.6-luna', 'gpt-5.6-sol']);
 });
 
 test('model tier resolves only to account models', () => {
   assert.equal(selectModelForTier(account, 'economy'), 'gpt-5.6-luna');
   assert.equal(selectModelForTier(account, 'balanced'), 'gpt-5.6-terra');
   assert.equal(selectModelForTier(account, 'deep'), 'gpt-5.6-sol');
+});
+
+test('model allowlist is a hard constraint for tier selection', () => {
+  assert.equal(
+    selectModelForTier(account, 'deep', { allowedModels: ['gpt-5.6-luna', 'gpt-5.6-terra'] }),
+    'gpt-5.6-terra',
+  );
+  assert.equal(
+    selectModelForTier(account, 'economy', { allowedModels: ['gpt-5.6-sol'] }),
+    'gpt-5.6-sol',
+  );
+  assert.equal(selectModelForTier(account, 'deep', { allowedModels: [] }), null);
+  assert.equal(selectModelForTier(account, 'deep', { allowedModels: ['unknown-model'] }), null);
 });
 
 test('redaction removes common credentials and personal path/email', () => {
@@ -54,6 +74,46 @@ test('active routing respects confidence and explicit effort', () => {
   const observe = resolveJevRouting(account, {}, decision, { mode: 'observe', minConfidence: 0.8 });
   assert.equal(observe.applyModel, false);
   assert.equal(observe.recommendedModel, 'gpt-5.6-sol');
+});
+
+test('active routing cannot recommend a disabled model', () => {
+  const route = resolveJevRouting(account, {}, {
+    status: 'ok',
+    routeTier: 'deep',
+    routeConfidence: 0.99,
+    reasoningEffort: 'high',
+    effortConfidence: 0.99,
+    failureSignal: 0,
+    semanticRisk: 1,
+  }, {
+    mode: 'active',
+    minConfidence: 0.8,
+    allowedModels: ['gpt-5.6-luna', 'gpt-5.6-terra'],
+  });
+  assert.equal(route.recommendedModel, 'gpt-5.6-terra');
+  assert.equal(route.applyModel, true);
+  assert.equal(route.modelPolicyRestricted, true);
+  assert.deepEqual(route.eligibleModels, ['gpt-5.6-luna', 'gpt-5.6-terra']);
+});
+
+test('empty model allowlist disables Jev model override without blocking effort routing', () => {
+  const route = resolveJevRouting(account, {}, {
+    status: 'ok',
+    routeTier: 'deep',
+    routeConfidence: 0.99,
+    reasoningEffort: 'high',
+    effortConfidence: 0.99,
+    failureSignal: 0,
+    semanticRisk: 1,
+  }, {
+    mode: 'active',
+    minConfidence: 0.8,
+    allowedModels: [],
+  });
+  assert.equal(route.recommendedModel, null);
+  assert.equal(route.applyModel, false);
+  assert.equal(route.applyEffort, true);
+  assert.deepEqual(route.eligibleModels, []);
 });
 
 test('evaluator manipulation disables active overrides', () => {
@@ -102,6 +162,7 @@ test('advisor sends sanitized state and parses typed decisions', async () => {
       sampleRate: 1,
       cacheTtlMs: 1000,
       maxRequestsPerMinute: 60,
+      allowedModels: ['gpt-5.6-terra', 'gpt-5.6-sol'],
     },
     fetchImpl: async (_url, init) => {
       sent = JSON.parse(init.body);
@@ -132,6 +193,8 @@ test('advisor sends sanitized state and parses typed decisions', async () => {
   assert.equal(result.routeTier, 'deep');
   assert.equal(result.inputTokens, 42);
   assert.doesNotMatch(sent.state.task, /1234567890abcdef|test@example\.com/);
+  assert.deepEqual(sent.state.router.available_models, ['gpt-5.6-terra', 'gpt-5.6-sol']);
+  assert.equal(sent.state.router.model_policy_restricted, true);
 });
 
 test('advisor API failure returns fallback status instead of throwing', async () => {
