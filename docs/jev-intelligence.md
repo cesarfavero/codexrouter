@@ -138,7 +138,9 @@ Router request events can include a `jev` object with:
 - recommended model/effort;
 - whether each recommendation was actually applied.
 
-The prompt/task text is deliberately absent.
+The prompt/task text is deliberately absent. The desktop Activity message surfaces the Jev mode/status, recommended tier/model, whether the route was actually applied, and decision latency.
+
+If Jev detects a meaningful signal that the task text is trying to manipulate or bypass the evaluator/routing policy, the result is retained as telemetry but autonomous model/effort overrides are disabled for that request.
 
 The useful rollout comparison is not “did Jev choose a stronger model?” but:
 
