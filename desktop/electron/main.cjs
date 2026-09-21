@@ -90,8 +90,16 @@ function desktopJevConfig(jev) {
     ? Math.max(0, Math.min(1, Number(settings.minConfidence)))
     : base.minConfidence;
   const model = typeof settings.model === 'string' && settings.model.trim() ? settings.model.trim() : base.model;
+  const hasStoredModelPolicy = Object.prototype.hasOwnProperty.call(settings, 'allowedModels');
+  const allowedModels = hasStoredModelPolicy
+    ? settings.allowedModels === null
+      ? null
+      : Array.isArray(settings.allowedModels)
+        ? [...new Set(settings.allowedModels.map(value => String(value || '').trim()).filter(Boolean))]
+        : base.allowedModels
+    : base.allowedModels;
   const apiKey = storedKey || base.apiKey;
-  return { ...base, mode, model, minConfidence, apiKey, configured: Boolean(apiKey) };
+  return { ...base, mode, model, minConfidence, allowedModels, apiKey, configured: Boolean(apiKey) };
 }
 
 function desktopJevSummary(jev) {
@@ -103,6 +111,7 @@ function desktopJevSummary(jev) {
     configured: config.configured,
     model: config.model,
     minConfidence: config.minConfidence,
+    allowedModels: config.allowedModels === null ? null : [...config.allowedModels],
     keySource: stored ? 'secure-storage' : config.configured ? 'environment' : 'none',
     secureStorageAvailable: safeStorage.isEncryptionAvailable(),
   };
@@ -125,6 +134,19 @@ async function applyJevSettings(raw) {
   if (!Number.isFinite(minConfidence) || minConfidence < 0 || minConfidence > 1) throw new Error('Jev minimum confidence must be between 0 and 1.');
 
   const next = { ...current, mode, model, minConfidence };
+  if (Object.prototype.hasOwnProperty.call(raw || {}, 'allowedModels')) {
+    if (raw.allowedModels === null) {
+      next.allowedModels = null;
+    } else {
+      if (!Array.isArray(raw.allowedModels)) throw new Error('Jev allowed models must be an array or null.');
+      if (raw.allowedModels.length > 128) throw new Error('Jev allowed model list is too large.');
+      const allowedModels = [...new Set(raw.allowedModels.map(value => String(value || '').trim()).filter(Boolean))];
+      if (allowedModels.some(value => value.length > 180 || !/^[A-Za-z0-9._/-]+$/.test(value))) {
+        throw new Error('Jev allowed model list contains an invalid model id.');
+      }
+      next.allowedModels = allowedModels;
+    }
+  }
   if (raw?.clearApiKey === true) delete next.apiKeyCiphertext;
 
   const apiKey = typeof raw?.apiKey === 'string' ? raw.apiKey.trim() : '';
@@ -142,7 +164,8 @@ async function applyJevSettings(raw) {
     await startRuntime(restartPort);
   }
   const summary = desktopJevSummary(jev);
-  record('info', `Jev semantic routing saved: ${summary.mode} · ${summary.configured ? 'configured' : 'no API key'} · ${summary.model}.`);
+  const modelPolicy = summary.allowedModels === null ? 'all models eligible' : `${summary.allowedModels.length} model(s) eligible`;
+  record('info', `Jev semantic routing saved: ${summary.mode} · ${summary.configured ? 'configured' : 'no API key'} · ${summary.model} · ${modelPolicy}.`);
   sendEvent({ type: 'snapshot-invalidated' });
   return snapshot();
 }
