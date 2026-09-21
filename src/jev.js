@@ -84,6 +84,7 @@ export function jevConfigFromEnv(env = process.env) {
 export function createJevAdvisor({ config = jevConfigFromEnv(), fetchImpl = fetch, random = Math.random, now = () => Date.now() } = {}) {
   const cache = new Map();
   const calls = [];
+  const allowedModels = config.allowedModels == null ? null : parseModelList(config.allowedModels);
 
   return {
     mode: config.mode,
@@ -95,7 +96,7 @@ export function createJevAdvisor({ config = jevConfigFromEnv(), fetchImpl = fetc
         timeoutMs: config.timeoutMs,
         sampleRate: config.sampleRate,
         maxRequestsPerMinute: config.maxRequestsPerMinute,
-        allowedModels: config.allowedModels === null ? null : [...config.allowedModels],
+        allowedModels: allowedModels === null ? null : [...allowedModels],
       };
     },
     async advise({ request, account, endpoint = 'responses' }) {
@@ -108,7 +109,7 @@ export function createJevAdvisor({ config = jevConfigFromEnv(), fetchImpl = fetc
       while (calls.length && calls[0] < minuteAgo) calls.shift();
       if (calls.length >= config.maxRequestsPerMinute) return decisionStatus('budget-limited');
 
-      const state = buildJevState({ request, account, endpoint, maxChars: config.maxChars, allowedModels: config.allowedModels });
+      const state = buildJevState({ request, account, endpoint, maxChars: config.maxChars, allowedModels });
       if (!state.task) return decisionStatus('empty-state');
 
       const cacheKey = crypto.createHash('sha256').update(JSON.stringify({ model: config.model, state, questions: QUESTIONS })).digest('hex');
@@ -150,7 +151,7 @@ export function createJevAdvisor({ config = jevConfigFromEnv(), fetchImpl = fetc
       return resolveJevRouting(account, request, decision, {
         mode: config.mode,
         minConfidence: config.minConfidence,
-        allowedModels: config.allowedModels,
+        allowedModels,
       });
     },
   };
