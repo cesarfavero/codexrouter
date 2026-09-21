@@ -67,6 +67,14 @@ export type Snapshot = {
   integration: { installed: boolean; port: number };
   runtime: { running: boolean; port: number };
   autostart: { supported: boolean; enabled: boolean; development?: boolean };
+  jev: {
+    mode: 'off' | 'observe' | 'active';
+    configured: boolean;
+    model: string;
+    minConfidence: number;
+    keySource: 'secure-storage' | 'environment' | 'none';
+    secureStorageAvailable: boolean;
+  };
   codex: { available: boolean; version: string | null };
   gateway: { slug: string; displayName: string; activeAccountId: string | null };
   dataPath: string;
@@ -101,6 +109,7 @@ export type CodexRouterDesktopApi = {
   startRouter(): Promise<Snapshot>;
   stopRouter(): Promise<Snapshot>;
   openCodex(): Promise<{ ok: boolean }>;
+  setJevSettings(settings: { mode: 'off' | 'observe' | 'active'; model: string; minConfidence: number; apiKey?: string; clearApiKey?: boolean }): Promise<Snapshot>;
   setAutostart(enabled: boolean): Promise<{ supported: boolean; enabled: boolean }>;
   openExternal(url: string): Promise<void>;
   revealData(): Promise<{ ok: boolean }>;
