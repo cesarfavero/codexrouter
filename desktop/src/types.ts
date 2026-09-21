@@ -72,6 +72,7 @@ export type Snapshot = {
     configured: boolean;
     model: string;
     minConfidence: number;
+    allowedModels: string[] | null;
     keySource: 'secure-storage' | 'environment' | 'none';
     secureStorageAvailable: boolean;
   };
@@ -109,7 +110,7 @@ export type CodexRouterDesktopApi = {
   startRouter(): Promise<Snapshot>;
   stopRouter(): Promise<Snapshot>;
   openCodex(): Promise<{ ok: boolean }>;
-  setJevSettings(settings: { mode: 'off' | 'observe' | 'active'; model: string; minConfidence: number; apiKey?: string; clearApiKey?: boolean }): Promise<Snapshot>;
+  setJevSettings(settings: { mode: 'off' | 'observe' | 'active'; model: string; minConfidence: number; allowedModels: string[] | null; apiKey?: string; clearApiKey?: boolean }): Promise<Snapshot>;
   setAutostart(enabled: boolean): Promise<{ supported: boolean; enabled: boolean }>;
   openExternal(url: string): Promise<void>;
   revealData(): Promise<{ ok: boolean }>;
