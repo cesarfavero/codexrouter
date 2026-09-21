@@ -388,6 +388,11 @@ async function stopRuntime({ restoreIntegration = true } = {}) {
   const server = routerServer;
   if (server) {
     routerServer = null;
+    // Codex can keep a negotiated WebSocket open indefinitely. Destroy the
+    // router-owned connections before waiting for Node's close callback so a
+    // settings restart cannot leave the renderer waiting forever.
+    server.closeRouterConnections?.();
+    server.closeAllConnections?.();
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     record('info', 'Router stopped.');
   }
@@ -528,7 +533,7 @@ function registerIpc() {
   }));
 
   ipcMain.handle('codexrouter:account:preferences', (_event, accountId, preferences) => withOperation('Save model preferences', async () => {
-    const { store } = await core();
+    const { store, auth, catalog } = await core();
     const { account } = store.getAccount(String(accountId));
     const model = preferences?.preferredModel == null ? account.preferredModel : String(preferences.preferredModel);
     const effort = preferences?.preferredEffort == null ? null : String(preferences.preferredEffort);
