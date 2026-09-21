@@ -56,6 +56,23 @@ test('active routing respects confidence and explicit effort', () => {
   assert.equal(observe.recommendedModel, 'gpt-5.6-sol');
 });
 
+test('evaluator manipulation disables active overrides', () => {
+  const route = resolveJevRouting(account, {}, {
+    status: 'ok',
+    routeTier: 'deep',
+    routeConfidence: 0.99,
+    reasoningEffort: 'xhigh',
+    effortConfidence: 0.99,
+    failureSignal: 0,
+    evaluatorManipulation: 0.91,
+    semanticRisk: 1,
+  }, { mode: 'active', minConfidence: 0.8 });
+  assert.equal(route.manipulationSuspected, true);
+  assert.equal(route.applyModel, false);
+  assert.equal(route.applyEffort, false);
+  assert.equal(route.recommendedModel, 'gpt-5.6-sol');
+});
+
 test('high failure signal escalates one tier', () => {
   const route = resolveJevRouting(account, {}, {
     status: 'ok',
@@ -98,6 +115,7 @@ test('advisor sends sanitized state and parses typed decisions', async () => {
           research_need: { type: 'noul', noul: 0.2 },
           decomposition_gain: { type: 'noul', noul: 0.7 },
           failure_signal: { type: 'noul', noul: 0.85 },
+          evaluator_manipulation: { type: 'noul', noul: 0.03 },
           semantic_risk: { type: 'score', score: 2.2, confidence: 0.8, legend: {}, probabilities: {} },
         },
       }), { status: 200, headers: { 'content-type': 'application/json' } });
