@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('codexRouter', {
   startRouter: () => invoke('codexrouter:runtime:start'),
   stopRouter: () => invoke('codexrouter:runtime:stop'),
   openCodex: () => invoke('codexrouter:open-codex'),
+  setJevSettings: settings => invoke('codexrouter:jev:settings', settings),
   setAutostart: enabled => invoke('codexrouter:autostart:set', enabled),
   openExternal: url => invoke('codexrouter:open-external', url),
   revealData: () => invoke('codexrouter:reveal-data'),
