@@ -12,5 +12,6 @@ This release adds an optional TypeSafe Jev semantic intelligence layer to the ma
 - Deterministic account selection, quota/cooldown logic, authentication, 401 refresh, and 429 failover remain authoritative.
 - Explicit native/account-qualified model selection bypasses Jev.
 - New Jev unit and proxy integration coverage.
+- Desktop Settings controls with OS-encrypted TypeSafe API-key storage; the secret never crosses into the renderer.
 
 See `docs/jev-intelligence.md` for configuration and the security boundary.
