@@ -73,7 +73,7 @@ Changing the active account in the desktop app rebuilds the gateway catalog for 
 
 CodexRouter can use TypeSafe Jev as a semantic control plane for the managed `codexrouter/gateway` while keeping account eligibility, quota/cooldown, authentication and 429 failover deterministic.
 
-Jev is **off by default**. Start in shadow mode:
+Jev is **off by default**. In the desktop app, configure it under **Settings**; the TypeSafe key is encrypted with OS secure storage and is never exposed back to the renderer. For shell/headless use, start in shadow mode with environment variables:
 
 ```bash
 export TYPESAFE_API_KEY='...'
