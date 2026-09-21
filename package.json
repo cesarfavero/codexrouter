@@ -1,6 +1,6 @@
 {
   "name": "codexrouter",
-  "version": "0.4.33",
+  "version": "0.4.34",
   "description": "Desktop-first single-model gateway for Codex with isolated ChatGPT accounts and usage telemetry.",
   "type": "module",
   "main": "desktop/electron/main.cjs",
@@ -10,7 +10,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/cli.js && node --check src/router.js && node --check src/catalog.js && node --check src/auth.js && node --check src/usage.js && node --check desktop/electron/main.cjs && node --check desktop/electron/preload.cjs && node --check desktop/electron/autostart.cjs && node --check desktop/scripts/package-bin.cjs && node --check desktop/scripts/dev.cjs && node --check desktop/scripts/dev-smoke.cjs && node --check scripts/e2e-macos.mjs",
+    "check": "node --check src/cli.js && node --check src/router.js && node --check src/catalog.js && node --check src/auth.js && node --check src/usage.js && node --check src/jev.js && node --check desktop/electron/main.cjs && node --check desktop/electron/preload.cjs && node --check desktop/electron/autostart.cjs && node --check desktop/scripts/package-bin.cjs && node --check desktop/scripts/dev.cjs && node --check desktop/scripts/dev-smoke.cjs && node --check scripts/e2e-macos.mjs",
     "desktop:dev": "node desktop/scripts/dev.cjs",
     "desktop:dev:smoke": "node desktop/scripts/dev-smoke.cjs",
     "desktop:typecheck": "tsc -p desktop/tsconfig.json --noEmit",

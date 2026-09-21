@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, safeStorage } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -13,6 +13,8 @@ const VALID_EFFORTS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh']);
 const TRAY_ICON = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAkElEQVR4nO2XSw6AMAhEwXj/K+PKpLF8ay1pZLbWmQcYUYDS34WeQ0REwwGIaoZ68U2wF+RYEa75sQCzwzVfsQOr1M3Fqt56qKIep2UWCX6e9YwyfQQugEj10fv26EABFEABpAOMbsctXsXuZXRXM2MbtmLNvvogAegLSB8BCzC6/SxxvmIHZkNIfun/BaV0XTuOPDLd7faPAAAAAElFTkSuQmCC';
 const UPDATE_CHECK_URL = 'https://api.github.com/repos/cesarfavero/codexrouter/releases/latest';
 const LOG_PATH = path.join(os.homedir(), '.codexrouter', 'logs', 'router.jsonl');
+const JEV_SETTINGS_PATH = path.join(os.homedir(), '.codexrouter', 'jev-settings.json');
+const JEV_MODES = new Set(['off', 'observe', 'active']);
 
 let mainWindow = null;
 let tray = null;
@@ -47,11 +49,102 @@ async function core() {
       import(moduleUrl('src/router.js')),
       import(moduleUrl('src/paths.js')),
       import(moduleUrl('src/usage.js')),
-    ]).then(([store, auth, catalog, integration, router, paths, usage]) => ({
-      store, auth, catalog, integration, router, paths, usage,
+      import(moduleUrl('src/jev.js')),
+    ]).then(([store, auth, catalog, integration, router, paths, usage, jev]) => ({
+      store, auth, catalog, integration, router, paths, usage, jev,
     }));
   }
   return corePromise;
+}
+
+function loadJevSettings() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(JEV_SETTINGS_PATH, 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveJevSettings(settings) {
+  fs.mkdirSync(path.dirname(JEV_SETTINGS_PATH), { recursive: true, mode: 0o700 });
+  const temporary = `${JEV_SETTINGS_PATH}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(settings, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  fs.renameSync(temporary, JEV_SETTINGS_PATH);
+  try { fs.chmodSync(JEV_SETTINGS_PATH, 0o600); } catch {}
+}
+
+function decryptStoredJevKey(settings) {
+  const encoded = typeof settings.apiKeyCiphertext === 'string' ? settings.apiKeyCiphertext : '';
+  if (!encoded) return null;
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  try { return safeStorage.decryptString(Buffer.from(encoded, 'base64')); } catch { return null; }
+}
+
+function desktopJevConfig(jev) {
+  const base = jev.jevConfigFromEnv(process.env);
+  const settings = loadJevSettings();
+  const storedKey = decryptStoredJevKey(settings);
+  const mode = JEV_MODES.has(settings.mode) ? settings.mode : base.mode;
+  const minConfidence = Number.isFinite(Number(settings.minConfidence))
+    ? Math.max(0, Math.min(1, Number(settings.minConfidence)))
+    : base.minConfidence;
+  const model = typeof settings.model === 'string' && settings.model.trim() ? settings.model.trim() : base.model;
+  const apiKey = storedKey || base.apiKey;
+  return { ...base, mode, model, minConfidence, apiKey, configured: Boolean(apiKey) };
+}
+
+function desktopJevSummary(jev) {
+  const settings = loadJevSettings();
+  const config = desktopJevConfig(jev);
+  const stored = Boolean(settings.apiKeyCiphertext && decryptStoredJevKey(settings));
+  return {
+    mode: config.mode,
+    configured: config.configured,
+    model: config.model,
+    minConfidence: config.minConfidence,
+    keySource: stored ? 'secure-storage' : config.configured ? 'environment' : 'none',
+    secureStorageAvailable: safeStorage.isEncryptionAvailable(),
+  };
+}
+
+function createDesktopJevAdvisor(jev) {
+  return jev.createJevAdvisor({ config: desktopJevConfig(jev) });
+}
+
+async function applyJevSettings(raw) {
+  const { jev } = await core();
+  const current = loadJevSettings();
+  const mode = String(raw?.mode || 'off').trim().toLowerCase();
+  if (!JEV_MODES.has(mode)) throw new Error('Jev mode must be off, observe, or active.');
+
+  const model = String(raw?.model || 'jev-1.13.0').trim();
+  if (!model || model.length > 120 || !/^[A-Za-z0-9._/-]+$/.test(model)) throw new Error('Jev model id is invalid.');
+
+  const minConfidence = Number(raw?.minConfidence);
+  if (!Number.isFinite(minConfidence) || minConfidence < 0 || minConfidence > 1) throw new Error('Jev minimum confidence must be between 0 and 1.');
+
+  const next = { ...current, mode, model, minConfidence };
+  if (raw?.clearApiKey === true) delete next.apiKeyCiphertext;
+
+  const apiKey = typeof raw?.apiKey === 'string' ? raw.apiKey.trim() : '';
+  if (apiKey) {
+    if (apiKey.length > 4096) throw new Error('TypeSafe API key is too long.');
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure OS encryption is unavailable. Use TYPESAFE_API_KEY instead of storing the key in CodexRouter.');
+    next.apiKeyCiphertext = safeStorage.encryptString(apiKey).toString('base64');
+  }
+
+  saveJevSettings(next);
+  const wasRunning = Boolean(routerServer?.listening);
+  const restartPort = routerPort;
+  if (wasRunning) {
+    await stopRuntime({ restoreIntegration: false });
+    await startRuntime(restartPort);
+  }
+  const summary = desktopJevSummary(jev);
+  record('info', `Jev semantic routing saved: ${summary.mode} · ${summary.configured ? 'configured' : 'no API key'} · ${summary.model}.`);
+  sendEvent({ type: 'snapshot-invalidated' });
+  return snapshot();
 }
 
 function record(level, message, details = null) {
@@ -77,7 +170,11 @@ function recordRouterRequest(event) {
   const attempts = Array.isArray(event.attempts) ? event.attempts : [];
   const failures = attempts.filter(attempt => attempt.error).map(attempt => `${attempt.reason}:${attempt.status} ${attempt.error}`).join(' | ');
   const suffix = event.error || failures;
-  const message = `Request ${event.requestId || 'unknown'} via Router → ${account} · ${target} · ${event.status} · ${event.durationMs ?? 0}ms${suffix ? ` · ${suffix}` : ''}`;
+  const jev = event.jev;
+  const jevSuffix = jev
+    ? ` · Jev ${jev.mode || 'shadow'}:${jev.status}${jev.routeTier ? ` ${jev.routeTier}→${jev.recommendedModel || 'default'}${jev.appliedModel ? ' applied' : ' shadow'}` : ''}${Number.isFinite(jev.latencyMs) ? ` ${jev.latencyMs}ms` : ''}`
+    : '';
+  const message = `Request ${event.requestId || 'unknown'} via Router → ${account} · ${target} · ${event.status} · ${event.durationMs ?? 0}ms${jevSuffix}${suffix ? ` · ${suffix}` : ''}`;
   const details = { ...event, account: event.account ? { id: event.account.id, label: event.account.label } : null };
   record(event.status >= 500 || event.error ? 'error' : event.status >= 400 ? 'warning' : 'info', message, details);
 }
@@ -135,7 +232,7 @@ async function withOperation(name, work) {
 }
 
 async function snapshot() {
-  const { store, auth, integration, paths, usage, catalog } = await core();
+  const { store, auth, integration, paths, usage, catalog, jev } = await core();
   const registry = store.loadRegistry();
 
   const accounts = await Promise.all(registry.accounts.map(async account => {
@@ -185,6 +282,7 @@ async function snapshot() {
     integration: { installed: installed.installed, port: installed.journal?.port ?? DEFAULT_PORT },
     runtime: { running: Boolean(routerServer?.listening), port: routerPort },
     autostart: getAutostart(app),
+    jev: desktopJevSummary(jev),
     codex: {
       available: !codexProbe.error && codexProbe.status === 0,
       version: codexProbe.status === 0 ? String(codexProbe.stdout || codexProbe.stderr || '').trim() : null,
@@ -203,10 +301,12 @@ async function snapshot() {
 
 async function startRuntime(preferredPort) {
   if (routerServer?.listening) return snapshot();
-  const { router } = await core();
+  const { router, jev } = await core();
   routerPort = Number(preferredPort || DEFAULT_PORT);
+  const jevAdvisor = createDesktopJevAdvisor(jev);
   let server = router.startRouter({
     port: routerPort,
+    jevAdvisor,
     onRequest: recordRouterRequest,
   });
   try {
@@ -220,6 +320,7 @@ async function startRuntime(preferredPort) {
     await new Promise(resolve => setTimeout(resolve, 150));
     server = router.startRouter({
       port: routerPort,
+      jevAdvisor,
       onRequest: recordRouterRequest,
     });
     await waitForServer(server);
@@ -464,6 +565,8 @@ function registerIpc() {
     record('info', 'Requested Codex Desktop launch.');
     return { ok: true };
   });
+
+  ipcMain.handle('codexrouter:jev:settings', (_event, settings) => withOperation('Save Jev settings', () => applyJevSettings(settings)));
 
   ipcMain.handle('codexrouter:autostart:set', (_event, enabled) => {
     const result = setAutostart(app, Boolean(enabled));

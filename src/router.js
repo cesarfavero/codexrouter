@@ -9,6 +9,7 @@ import { allAccounts, defaultAccount, setDefaultAccount } from './store.js';
 import { catalogPath, mainCodexHome } from './paths.js';
 import { readJson } from './fs-util.js';
 import { getAccountUsage } from './usage.js';
+import { createJevAdvisor, selectModelForTier, summarizeJevDecision } from './jev.js';
 
 const HOP_BY_HOP = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te',
@@ -23,6 +24,7 @@ export function startRouter({
   upstreamBase = process.env.CODEXROUTER_UPSTREAM_BASE || 'https://chatgpt.com/backend-api/codex',
   officialUpstreamBase = process.env.CODEXROUTER_OFFICIAL_UPSTREAM_BASE || upstreamBase,
   usageReader = getAccountUsage,
+  jevAdvisor = createJevAdvisor(),
   onRequest = null,
 } = {}) {
   const server = http.createServer(async (req, res) => {
@@ -30,11 +32,13 @@ export function startRouter({
     const startedAt = Date.now();
     let routedAccount = null;
     let routedModel = null;
+    let jevDecision = null;
+    let jevRouting = null;
     const attempts = [];
     try {
       if (req.method === 'GET' && req.url === '/health') {
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, service: 'codexrouter', model: GATEWAY_SLUG }));
+        res.end(JSON.stringify({ ok: true, service: 'codexrouter', model: GATEWAY_SLUG, jev: jevAdvisor?.status?.() ?? { mode: 'off', configured: false } }));
         return;
       }
       if (req.method === 'GET' && (req.url === '/v1/models' || req.url?.startsWith('/v1/models?'))) {
@@ -86,7 +90,16 @@ export function startRouter({
           } else {
             account = await selectGatewayAccount(account, usageReader);
             if (!account.preferredModel) throw httpError(503, `The active account “${account.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);
-            parsed.model = isGatewaySlug(requestedModel) ? account.preferredModel : requestedModel;
+            let selectedModel = isGatewaySlug(requestedModel) ? account.preferredModel : requestedModel;
+            if (isGatewaySlug(requestedModel) && jevAdvisor?.mode !== 'off') {
+              jevDecision = await adviseJevSafely(jevAdvisor, { request: parsed, account, endpoint });
+              jevRouting = jevAdvisor?.resolve?.(account, parsed, jevDecision) ?? null;
+              if (jevRouting?.applyModel && jevRouting.recommendedModel) selectedModel = jevRouting.recommendedModel;
+              if (jevRouting?.applyEffort && jevRouting.recommendedEffort) {
+                parsed.reasoning = { ...(parsed.reasoning || {}), effort: jevRouting.recommendedEffort };
+              }
+            }
+            parsed.model = selectedModel;
           }
           if (account.preferredEffort) {
             parsed.reasoning = { ...(parsed.reasoning || {}), effort: parsed.reasoning?.effort || account.preferredEffort };
@@ -109,7 +122,10 @@ export function startRouter({
         if (fallback && fallback.id !== account.id) {
           if (!fallback.preferredModel) throw httpError(503, `The fallback account “${fallback.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);
           account = fallback;
-          body = Buffer.from(JSON.stringify({ ...JSON.parse(body.toString('utf8')), model: account.preferredModel }));
+          const fallbackModel = jevAdvisor?.mode === 'active' && jevRouting?.tier
+            ? selectModelForTier(account, jevRouting.tier)
+            : account.preferredModel;
+          body = Buffer.from(JSON.stringify({ ...JSON.parse(body.toString('utf8')), model: fallbackModel || account.preferredModel }));
           upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: false, decodedRequestBody });
           attempts.push(await describeAttempt(upstream, account, 'account-failover'));
         }
@@ -119,11 +135,12 @@ export function startRouter({
       routedAccount = account;
       routedModel = requestModel;
       const usage = await writeResponse(res, upstream);
-      await emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http', durationMs: Date.now() - startedAt, attempts, usage: null });
-      if (usage) void emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http-usage', durationMs: Date.now() - startedAt, attempts, usage, usageOnly: true });
+      const jev = summarizeJevDecision(jevDecision, jevRouting);
+      await emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http', durationMs: Date.now() - startedAt, attempts, usage: null, jev });
+      if (usage) void emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http-usage', durationMs: Date.now() - startedAt, attempts, usage, usageOnly: true, jev });
     } catch (error) {
       const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
-      await emitRequest(onRequest, { requestId, account: routedAccount, endpoint: req.url?.split('?')[0] || null, model: routedModel, status, transport: 'http', durationMs: Date.now() - startedAt, attempts, error: sanitizeLogText(error?.message || String(error)) });
+      await emitRequest(onRequest, { requestId, account: routedAccount, endpoint: req.url?.split('?')[0] || null, model: routedModel, status, transport: 'http', durationMs: Date.now() - startedAt, attempts, error: sanitizeLogText(error?.message || String(error)), jev: summarizeJevDecision(jevDecision, jevRouting) });
       res.writeHead(status, { 'content-type': 'application/json' });
       res.end(JSON.stringify({
         error: {
@@ -150,6 +167,14 @@ export function startRouter({
 async function emitRequest(onRequest, event) {
   if (!onRequest) return;
   try { await onRequest(event); } catch {}
+}
+
+async function adviseJevSafely(jevAdvisor, context) {
+  try {
+    return await jevAdvisor.advise(context);
+  } catch {
+    return { status: 'advisor-error' };
+  }
 }
 
 function decodeRequestBody(raw, contentEncoding) {

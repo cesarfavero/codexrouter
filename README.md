@@ -69,6 +69,22 @@ official Codex backend
 
 Changing the active account in the desktop app rebuilds the gateway catalog for that account.
 
+## Optional Jev semantic routing
+
+CodexRouter can use TypeSafe Jev as a semantic control plane for the managed `codexrouter/gateway` while keeping account eligibility, quota/cooldown, authentication and 429 failover deterministic.
+
+Jev is **off by default**. In the desktop app, configure it under **Settings**; the TypeSafe key is encrypted with OS secure storage and is never exposed back to the renderer. For shell/headless use, start in shadow mode with environment variables:
+
+```bash
+export TYPESAFE_API_KEY='...'
+export CODEXROUTER_JEV_MODE=observe
+export CODEXROUTER_JEV_MODEL=jev-1.13.0
+```
+
+`observe` records a typed recommendation without changing the routed model. `active` may apply a high-confidence model tier and reasoning effort, always constrained to native models available on the selected account. Explicit native model choices bypass Jev.
+
+Enabling `observe` or `active` sends a capped and sanitized subset of task text to TypeSafe. Authentication material is not sent, and task text is not written to Router telemetry. See [Jev intelligence layer](docs/jev-intelligence.md) for the full data-flow, configuration, metrics and security boundary.
+
 ## Accounts and login
 
 Every account gets its own isolated `CODEX_HOME`:
