@@ -170,7 +170,11 @@ function recordRouterRequest(event) {
   const attempts = Array.isArray(event.attempts) ? event.attempts : [];
   const failures = attempts.filter(attempt => attempt.error).map(attempt => `${attempt.reason}:${attempt.status} ${attempt.error}`).join(' | ');
   const suffix = event.error || failures;
-  const message = `Request ${event.requestId || 'unknown'} via Router → ${account} · ${target} · ${event.status} · ${event.durationMs ?? 0}ms${suffix ? ` · ${suffix}` : ''}`;
+  const jev = event.jev;
+  const jevSuffix = jev
+    ? ` · Jev ${jev.mode || 'shadow'}:${jev.status}${jev.routeTier ? ` ${jev.routeTier}→${jev.recommendedModel || 'default'}${jev.appliedModel ? ' applied' : ' shadow'}` : ''}${Number.isFinite(jev.latencyMs) ? ` ${jev.latencyMs}ms` : ''}`
+    : '';
+  const message = `Request ${event.requestId || 'unknown'} via Router → ${account} · ${target} · ${event.status} · ${event.durationMs ?? 0}ms${jevSuffix}${suffix ? ` · ${suffix}` : ''}`;
   const details = { ...event, account: event.account ? { id: event.account.id, label: event.account.label } : null };
   record(event.status >= 500 || event.error ? 'error' : event.status >= 400 ? 'warning' : 'info', message, details);
 }
