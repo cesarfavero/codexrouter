@@ -75,6 +75,9 @@ export function jevConfigFromEnv(env = process.env) {
     sampleRate: numeric(env.CODEXROUTER_JEV_SAMPLE_RATE, 1, 0, 1),
     cacheTtlMs: Math.floor(numeric(env.CODEXROUTER_JEV_CACHE_TTL_MS, 300_000, 0, 3_600_000)),
     maxRequestsPerMinute: Math.floor(numeric(env.CODEXROUTER_JEV_MAX_RPM, 60, 1, 1_200)),
+    allowedModels: Object.prototype.hasOwnProperty.call(env, 'CODEXROUTER_JEV_ALLOWED_MODELS')
+      ? parseModelList(env.CODEXROUTER_JEV_ALLOWED_MODELS)
+      : null,
   };
 }
 
@@ -92,6 +95,7 @@ export function createJevAdvisor({ config = jevConfigFromEnv(), fetchImpl = fetc
         timeoutMs: config.timeoutMs,
         sampleRate: config.sampleRate,
         maxRequestsPerMinute: config.maxRequestsPerMinute,
+        allowedModels: config.allowedModels === null ? null : [...config.allowedModels],
       };
     },
     async advise({ request, account, endpoint = 'responses' }) {
@@ -104,7 +108,7 @@ export function createJevAdvisor({ config = jevConfigFromEnv(), fetchImpl = fetc
       while (calls.length && calls[0] < minuteAgo) calls.shift();
       if (calls.length >= config.maxRequestsPerMinute) return decisionStatus('budget-limited');
 
-      const state = buildJevState({ request, account, endpoint, maxChars: config.maxChars });
+      const state = buildJevState({ request, account, endpoint, maxChars: config.maxChars, allowedModels: config.allowedModels });
       if (!state.task) return decisionStatus('empty-state');
 
       const cacheKey = crypto.createHash('sha256').update(JSON.stringify({ model: config.model, state, questions: QUESTIONS })).digest('hex');
@@ -143,17 +147,22 @@ export function createJevAdvisor({ config = jevConfigFromEnv(), fetchImpl = fetc
       }
     },
     resolve(account, request, decision) {
-      return resolveJevRouting(account, request, decision, { mode: config.mode, minConfidence: config.minConfidence });
+      return resolveJevRouting(account, request, decision, {
+        mode: config.mode,
+        minConfidence: config.minConfidence,
+        allowedModels: config.allowedModels,
+      });
     },
   };
 }
 
-export function resolveJevRouting(account, request, decision, { mode = 'off', minConfidence = 0.78 } = {}) {
+export function resolveJevRouting(account, request, decision, { mode = 'off', minConfidence = 0.78, allowedModels = null } = {}) {
   if (!decision || decision.status !== 'ok') return { mode, applicable: false, reason: decision?.status || 'no-decision' };
   let tier = TIERS.has(decision.routeTier) ? decision.routeTier : 'balanced';
   if ((decision.failureSignal ?? 0) >= 0.8 || (decision.semanticRisk ?? 0) >= 2.4) tier = bumpTier(tier);
 
-  const recommendedModel = selectModelForTier(account, tier);
+  const eligibleModels = eligibleModelsForJev(account, allowedModels);
+  const recommendedModel = selectModelForTier(account, tier, { allowedModels });
   const recommendedEffort = EFFORTS.has(decision.reasoningEffort) ? decision.reasoningEffort : null;
   const modelConfidencePassed = Number(decision.routeConfidence) >= minConfidence;
   const effortConfidencePassed = Number(decision.effortConfidence) >= minConfidence;
@@ -170,17 +179,27 @@ export function resolveJevRouting(account, request, decision, { mode = 'off', mi
     modelConfidencePassed,
     effortConfidencePassed,
     manipulationSuspected,
+    modelPolicyRestricted: allowedModels !== null,
+    eligibleModels,
     applyModel: Boolean(active && recommendedModel && modelConfidencePassed),
     applyEffort: Boolean(active && recommendedEffort && effortConfidencePassed && !explicitEffort),
   };
 }
 
-export function selectModelForTier(account, tier) {
+export function eligibleModelsForJev(account, allowedModels = null) {
   const preferred = typeof account?.preferredModel === 'string' ? account.preferredModel : null;
   const available = Array.isArray(account?.availableModels)
     ? account.availableModels.map(item => typeof item === 'string' ? item : item?.slug).filter(Boolean)
     : [];
   const models = [...new Set([...available, preferred].filter(Boolean))];
+  if (allowedModels === null) return models;
+  const allowed = new Set(parseModelList(allowedModels));
+  return models.filter(model => allowed.has(model));
+}
+
+export function selectModelForTier(account, tier, { allowedModels = null } = {}) {
+  const preferred = typeof account?.preferredModel === 'string' ? account.preferredModel : null;
+  const models = eligibleModelsForJev(account, allowedModels);
   if (!models.length) return null;
   if (models.length === 1) return models[0];
 
@@ -231,12 +250,15 @@ export function summarizeJevDecision(decision, routing = null) {
     recommendedEffort: routing?.recommendedEffort ?? null,
     appliedModel: routing?.applyModel === true,
     appliedEffort: routing?.applyEffort === true,
+    modelPolicyRestricted: routing?.modelPolicyRestricted === true,
+    eligibleModels: Array.isArray(routing?.eligibleModels) ? routing.eligibleModels : null,
   };
 }
 
-function buildJevState({ request, account, endpoint, maxChars }) {
+function buildJevState({ request, account, endpoint, maxChars, allowedModels = null }) {
   const rawText = [extractText(request?.instructions), extractText(request?.input)].filter(Boolean).join('\n\n');
   const sanitized = sanitizeJevText(rawText).trim();
+  const eligibleModels = eligibleModelsForJev(account, allowedModels);
   return {
     task: truncateText(sanitized, maxChars),
     request: {
@@ -248,9 +270,8 @@ function buildJevState({ request, account, endpoint, maxChars }) {
     },
     router: {
       preferred_model: account?.preferredModel ?? null,
-      available_models: Array.isArray(account?.availableModels)
-        ? account.availableModels.map(item => typeof item === 'string' ? item : item?.slug).filter(Boolean).slice(0, 32)
-        : [],
+      available_models: eligibleModels.slice(0, 32),
+      model_policy_restricted: allowedModels !== null,
     },
   };
 }
@@ -316,6 +337,13 @@ function probability(value) {
 function finite(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function parseModelList(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map(item => String(item || '').trim()).filter(Boolean))];
+  }
+  return [...new Set(String(value ?? '').split(',').map(item => item.trim()).filter(Boolean))];
 }
 
 function numeric(value, fallback, min, max) {
