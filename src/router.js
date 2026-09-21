@@ -290,12 +290,13 @@ function accountHeadroomScore(usage) {
 }
 
 function usageIsHealthy(usage) {
-  if (!usage || usage.status === 'cooldown') return false;
-  const remaining = [usage.primary?.remainingPercent, usage.secondary?.remainingPercent, usage.spendControl?.remainingPercent]
-    .filter(value => Number.isFinite(value));
-  // A low window is still usable. Only an actually exhausted window should
-  // remove an account before the upstream request has a chance to decide.
-  return !remaining.some(value => value <= 0);
+  // The upstream `allowed`/`limit_reached` decision is authoritative. A
+  // secondary window may legitimately be at 0 while the account remains
+  // allowed for the current model; do not discard that account before the
+  // five-hour headroom ranking can compare it with the others.
+  return Boolean(usage)
+    && usage.status === 'available'
+    && usage.limitReached !== true;
 }
 
 function cooldownError(account, usage) {

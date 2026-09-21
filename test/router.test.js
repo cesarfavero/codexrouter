@@ -475,6 +475,39 @@ test('gateway prioritizes five-hour quota when ranking healthy accounts', async 
   }
 });
 
+test('gateway keeps an allowed account with an exhausted secondary window in the ranking', async () => {
+  const state = await fixture();
+  let seenAccount = null;
+  const upstream = http.createServer((req, res) => {
+    seenAccount = req.headers['chatgpt-account-id'];
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end('data: [DONE]\n\n');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({
+    port: 0,
+    upstreamBase: `http://127.0.0.1:${upstream.address().port}`,
+    usageReader: async account => account.id === 'eduardo'
+      ? { status: 'available', limitReached: false, primary: { remainingPercent: 40 }, secondary: { remainingPercent: 87 } }
+      : { status: 'available', limitReached: false, primary: { remainingPercent: 88 }, secondary: { remainingPercent: 0 } },
+  });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(seenAccount, 'acct-cesar');
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+    state.restore();
+  }
+});
+
 test('gateway rolls over when the active account is nearly exhausted', async () => {
   const state = await fixture();
   let seenAccount = null;
