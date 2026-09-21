@@ -6,7 +6,7 @@ import { brotliDecompressSync, gunzipSync, inflateSync, zstdDecompressSync } fro
 import { freshAuth } from './auth.js';
 import { GATEWAY_SLUG, isGatewaySlug, parseAccountModelSlug } from './catalog.js';
 import { allAccounts, defaultAccount, setDefaultAccount } from './store.js';
-import { catalogPath } from './paths.js';
+import { catalogPath, mainCodexHome } from './paths.js';
 import { readJson } from './fs-util.js';
 import { getAccountUsage } from './usage.js';
 
@@ -21,6 +21,7 @@ export function startRouter({
   port = 17842,
   host = '127.0.0.1',
   upstreamBase = process.env.CODEXROUTER_UPSTREAM_BASE || 'https://chatgpt.com/backend-api/codex',
+  officialUpstreamBase = process.env.CODEXROUTER_OFFICIAL_UPSTREAM_BASE || upstreamBase,
   usageReader = getAccountUsage,
   onRequest = null,
 } = {}) {
@@ -43,17 +44,17 @@ export function startRouter({
         return;
       }
       if (req.method === 'GET' && req.url?.split('?')[0] === '/v1/responses') {
-        await emitRequest(onRequest, { requestId, account: null, endpoint: 'responses', model: null, status: 426, transport: 'capability-negotiation', method: 'GET', durationMs: Date.now() - startedAt, attempts: [] });
-        res.writeHead(426, { 'content-type': 'text/plain; charset=utf-8' });
-        res.end('Responses WebSocket transport is not enabled on this local route');
+        const upstream = await forwardOfficial({ req, body: Buffer.alloc(0), officialBase: officialUpstreamBase });
+        await writeResponse(res, upstream);
+        await emitRequest(onRequest, { requestId, account: null, endpoint: 'responses', model: null, status: upstream.status, transport: 'official-capability-negotiation', method: 'GET', durationMs: Date.now() - startedAt, attempts: [] });
         return;
       }
 
       const endpoint = routeEndpoint(req.method, req.url);
       if (!endpoint) {
-        await emitRequest(onRequest, { requestId, account: null, endpoint: req.url?.split('?')[0] || null, model: null, status: 404, transport: 'http', method: req.method || null, durationMs: Date.now() - startedAt, attempts: [] });
-        res.writeHead(404, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: { message: 'CodexRouter endpoint not found.' } }));
+        const upstream = await forwardOfficial({ req, body: await readBody(req), officialBase: officialUpstreamBase, forceRefresh: false });
+        await writeResponse(res, upstream);
+        await emitRequest(onRequest, { requestId, account: null, endpoint: req.url?.split('?')[0] || null, model: null, status: upstream.status, transport: 'official-http', method: req.method || null, durationMs: Date.now() - startedAt, attempts: [] });
         return;
       }
 
@@ -135,13 +136,12 @@ export function startRouter({
   });
   server.on('upgrade', (req, socket) => {
     const requestId = crypto.randomUUID();
-    if (req.url?.split('?')[0] !== '/v1/responses') {
-      void emitRequest(onRequest, { requestId, account: null, endpoint: req.url?.split('?')[0] || null, model: null, status: 404, transport: 'websocket-negotiation', method: 'GET', durationMs: 0, attempts: [] });
-      socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
-      return;
-    }
-    void emitRequest(onRequest, { requestId, account: null, endpoint: 'responses', model: null, status: 426, transport: 'websocket-negotiation', method: 'GET', durationMs: 0, attempts: [] });
-    socket.end('HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 0\r\n\r\n');
+    void proxyOfficialUpgrade({ req, socket, officialBase: officialUpstreamBase })
+      .then(() => emitRequest(onRequest, { requestId, account: null, endpoint: req.url?.split('?')[0] || null, model: null, status: 101, transport: 'official-websocket', method: 'GET', durationMs: 0, attempts: [] }))
+      .catch(error => {
+        void emitRequest(onRequest, { requestId, account: null, endpoint: req.url?.split('?')[0] || null, model: null, status: 502, transport: 'official-websocket', method: 'GET', durationMs: 0, attempts: [], error: sanitizeLogText(error?.message || String(error)) });
+        socket.destroy();
+      });
   });
   server.listen(port, host);
   return server;
@@ -304,6 +304,65 @@ async function forward({ req, body, account, endpoint, upstreamBase, forceRefres
   if (auth.accountId) headers.set('chatgpt-account-id', auth.accountId);
   const upstream = `${upstreamBase.replace(/\/$/, '')}/${endpoint}`;
   return fetch(upstream, { method: 'POST', headers, body });
+}
+
+async function forwardOfficial({ req, body, officialBase, forceRefresh }) {
+  const auth = await officialAuth({ force: forceRefresh, incomingAuthorization: req.headers.authorization });
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (value == null || HOP_BY_HOP.has(name.toLowerCase())) continue;
+    if (name.toLowerCase() === 'authorization' || name.toLowerCase() === 'chatgpt-account-id') continue;
+    if (Array.isArray(value)) value.forEach(item => headers.append(name, item));
+    else headers.set(name, String(value));
+  }
+  if (auth?.accessToken) headers.set('authorization', `Bearer ${auth.accessToken}`);
+  if (auth?.accountId) headers.set('chatgpt-account-id', auth.accountId);
+  const target = officialTarget(officialBase, req.url || '/');
+  return fetch(target, { method: req.method, headers, body: body?.length ? body : undefined });
+}
+
+async function officialAuth({ force = false, incomingAuthorization }) {
+  try { return freshAuth(mainCodexHome(), { force }); }
+  catch { return incomingAuthorization ? { accessToken: incomingAuthorization.replace(/^Bearer\s+/i, '') } : null; }
+}
+
+async function proxyOfficialUpgrade({ req, socket, officialBase }) {
+  const target = officialTarget(officialBase, req.url || '/');
+  const auth = await officialAuth({ incomingAuthorization: req.headers.authorization });
+  const transport = target.protocol === 'https:' ? await import('node:tls') : await import('node:net');
+  const upstream = target.protocol === 'https:'
+    ? transport.connect({ host: target.hostname, port: Number(target.port || 443), servername: target.hostname })
+    : transport.connect(Number(target.port || 80), target.hostname);
+  await new Promise((resolve, reject) => {
+    const fail = error => { upstream.destroy(); reject(error); };
+    upstream.once('error', fail);
+    upstream.once(target.protocol === 'https:' ? 'secureConnect' : 'connect', () => {
+      const headers = [];
+      for (const [name, value] of Object.entries(req.headers)) {
+        if (value == null || ['host', 'authorization', 'chatgpt-account-id'].includes(name.toLowerCase())) continue;
+        headers.push(`${name}: ${Array.isArray(value) ? value.join(', ') : value}`);
+      }
+      headers.push(`Host: ${target.host}`);
+      if (auth?.accessToken) headers.push(`Authorization: Bearer ${auth.accessToken}`);
+      if (auth?.accountId) headers.push(`chatgpt-account-id: ${auth.accountId}`);
+      upstream.write(`${req.method} ${target.pathname}${target.search} HTTP/1.1\r\n${headers.join('\r\n')}\r\n\r\n`);
+      upstream.pipe(socket).pipe(upstream);
+      resolve();
+    });
+  });
+}
+
+function stripVersionPrefix(url) {
+  return String(url).replace(/^\/v1(?=\/|\?|$)/, '') || '/';
+}
+
+function officialTarget(officialBase, requestUrl) {
+  const base = new URL(officialBase);
+  const request = new URL(String(requestUrl), 'http://codexrouter.invalid');
+  const suffix = stripVersionPrefix(request.pathname);
+  base.pathname = `${base.pathname.replace(/\/$/, '')}${suffix.startsWith('/') ? suffix : `/${suffix}`}`;
+  base.search = request.search;
+  return base;
 }
 
 function readBody(req) {

@@ -36,6 +36,24 @@ test('integration patches and restores unrelated native Codex config lines', () 
   });
 });
 
+test('integration collapses identical duplicate managed settings', () => {
+  withIntegrationFixture([
+    'openai_base_url = "http://127.0.0.1:17842/v1"',
+    'model_catalog_json = "/tmp/router-catalog.json"',
+    'openai_base_url = "http://127.0.0.1:17842/v1"',
+    'model_catalog_json = "/tmp/router-catalog.json"',
+    '[features]',
+    'foo = true',
+    '',
+  ].join('\n'), ({ codexHome }) => {
+    installIntegration({ port: 19001 });
+    const installed = fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8');
+    assert.equal((installed.match(/^openai_base_url = /gm) || []).length, 1);
+    assert.equal((installed.match(/^model_catalog_json = /gm) || []).length, 1);
+    uninstallIntegration();
+  });
+});
+
 test('uninstall drops stale Router integration values and Router-only model selection', () => {
   withIntegrationFixture('', ({ codexHome, routerHome }) => {
     const configPath = path.join(codexHome, 'config.toml');

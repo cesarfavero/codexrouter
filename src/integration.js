@@ -45,33 +45,42 @@ function firstTableIndex(lines) {
   return index < 0 ? lines.length : index;
 }
 
-function findTopLevel(lines, key) {
+function findTopLevelEntries(lines, key) {
   const regex = assignmentRegex(key);
   const matches = [];
   for (let i = 0; i < firstTableIndex(lines); i++) {
     if (/^\s*#/.test(lines[i])) continue;
     if (regex.test(lines[i])) matches.push({ index: i, line: lines[i] });
   }
-  if (matches.length > 1) throw new Error(`Duplicate top-level ${key} assignments in Codex config.`);
+  return matches;
+}
+
+function findTopLevel(lines, key) {
+  const matches = findTopLevelEntries(lines, key);
+  if (matches.length > 1 && new Set(matches.map(match => match.line)).size > 1) {
+    throw new Error(`Conflicting duplicate top-level ${key} assignments in Codex config.`);
+  }
   return matches[0] ?? null;
 }
 
 function setTopLevel(lines, key, line) {
-  const current = findTopLevel(lines, key);
-  if (current) {
-    lines[current.index] = line;
+  const matches = findTopLevelEntries(lines, key);
+  if (matches.length) {
+    findTopLevel(lines, key);
+    lines[matches[0].index] = line;
+    for (const duplicate of matches.slice(1).reverse()) lines.splice(duplicate.index, 1);
     return;
   }
   lines.splice(firstTableIndex(lines), 0, line);
 }
 
 function removeManagedLine(lines, key, expected) {
-  const current = findTopLevel(lines, key);
-  if (!current) return;
-  if (current.line !== expected) {
+  const matches = findTopLevelEntries(lines, key);
+  if (!matches.length) return;
+  if (matches.some(match => match.line !== expected)) {
     throw new Error(`Codex ${key} changed after CodexRouter install; refusing to overwrite it.`);
   }
-  lines.splice(current.index, 1);
+  for (const match of matches.reverse()) lines.splice(match.index, 1);
 }
 
 function removeRouterModelSelection(lines) {

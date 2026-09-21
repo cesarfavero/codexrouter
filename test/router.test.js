@@ -45,14 +45,47 @@ async function fixture() {
 
 test('responses capability negotiation falls back from WebSocket to HTTP/SSE', async () => {
   const state = await fixture();
-  const router = startRouter({ port: 0 });
+  const upstream = http.createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ websocket: true }));
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({ port: 0, officialUpstreamBase: `http://127.0.0.1:${upstream.address().port}/backend-api/codex` });
   await once(router, 'listening');
   try {
     const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`);
-    assert.equal(response.status, 426);
-    assert.match(await response.text(), /Responses WebSocket transport is not enabled/);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { websocket: true });
   } finally {
     await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+    state.restore();
+  }
+});
+
+test('router passes unknown Codex routes through to the official upstream', async () => {
+  const state = await fixture();
+  let seen = null;
+  const upstream = http.createServer((req, res) => {
+    seen = { url: req.url, method: req.method };
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({
+    port: 0,
+    officialUpstreamBase: `http://127.0.0.1:${upstream.address().port}/backend-api/codex`,
+  });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/remote/status?check=1`, { headers: { authorization: 'Bearer test' } });
+    assert.equal(response.status, 200);
+    assert.deepEqual(seen, { url: '/backend-api/codex/remote/status?check=1', method: 'GET' });
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
     state.restore();
   }
 });
