@@ -494,7 +494,7 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
               ? 'Integration not installed'
               : snapshot.integration.gatewayDefault
                 ? 'Router gateway is the Codex default'
-                : `Bypassed by default model: ${snapshot.integration.activeModel || 'unknown'}`}
+                : `Select Router in Codex · default: ${snapshot.integration.activeModel || 'unknown'}`}
           </span>
         </SettingRow>
         <SettingRow title="Jev context budget" description="Economy sends only the latest useful request and the smallest decision rubric. Balanced adds risk signals; Full keeps the complete rubric for evaluation.">

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { catalogPath, integrationJournalPath, mainCodexConfigPath } from './paths.js';
 import { ensureDir, readJson, writeJsonAtomic, writeTextAtomic } from './fs-util.js';
 
-const MANAGED_KEYS = ['openai_base_url', 'model_catalog_json', 'model'];
+const MANAGED_KEYS = ['openai_base_url', 'model_catalog_json'];
 const ROUTER_MODEL_PREFIX = 'codexrouter/';
 const GATEWAY_MODEL = 'codexrouter/gateway';
 const LEGACY_ROUTER_HOME_MARKERS = ['/.codexrouter/', '/.codex-chatgpt-web/'];
@@ -114,6 +114,7 @@ function assertInstalledValuesUnchanged(lines, journal) {
 }
 
 export function installIntegration({ port = 17842 } = {}) {
+  migrateGatewayDefaultModel();
   const configPath = mainCodexConfigPath();
   ensureDir(path.dirname(configPath));
   let text = '';
@@ -124,19 +125,18 @@ export function installIntegration({ port = 17842 } = {}) {
   const installed = {
     openai_base_url: `openai_base_url = ${quoteToml(`http://127.0.0.1:${port}/v1`)}`,
     model_catalog_json: `model_catalog_json = ${quoteToml(catalogPath())}`,
-    model: `model = ${quoteToml(GATEWAY_MODEL)}`,
   };
   setTopLevel(lines, 'openai_base_url', installed.openai_base_url);
   setTopLevel(lines, 'model_catalog_json', installed.model_catalog_json);
-  setTopLevel(lines, 'model', installed.model);
   const rendered = `${lines.join('\n')}${hadTrailingNewline || lines.length ? '\n' : ''}`;
   writeTextAtomic(configPath, rendered, 0o600);
-  const journal = { version: 2, configPath, port, previous, installed, installedAt: new Date().toISOString() };
+  const journal = { version: 3, configPath, port, previous, installed, installedAt: new Date().toISOString() };
   writeJsonAtomic(integrationJournalPath(), journal);
   return journal;
 }
 
 export function uninstallIntegration() {
+  migrateGatewayDefaultModel();
   const journal = readJson(integrationJournalPath());
   if (!journal) throw new Error('CodexRouter integration is not installed.');
   const text = fs.readFileSync(journal.configPath, 'utf8');
@@ -165,42 +165,41 @@ export function uninstallIntegration() {
   return journal;
 }
 
-export function ensureGatewayDefaultModel() {
-  const journal = readJson(integrationJournalPath());
-  if (!journal) throw new Error('CodexRouter integration is not installed.');
+export function migrateGatewayDefaultModel() {
+  const journal = readJson(integrationJournalPath(), null);
+  if (!journal?.installed?.model) return { changed: false };
   const text = fs.readFileSync(journal.configPath, 'utf8');
   const hadTrailingNewline = text.endsWith('\n');
   const lines = text ? text.replace(/\n$/, '').split(/\r?\n/) : [];
-  const trackedWithoutModel = journalManagedKeys(journal).filter(key => key !== 'model');
-  for (const key of trackedWithoutModel) {
+  for (const key of journalManagedKeys(journal)) {
     const current = findTopLevel(lines, key);
     if (!current || current.line !== journal.installed[key]) {
-      throw new Error(`Codex ${key} changed after CodexRouter install; refusing to repair the gateway model.`);
+      throw new Error(`Codex ${key} changed after CodexRouter install; refusing to migrate the gateway model.`);
     }
   }
 
-  const target = `model = ${quoteToml(GATEWAY_MODEL)}`;
   const current = findTopLevel(lines, 'model');
-  if (current?.line === target && journal.installed?.model === target) {
-    return { changed: false, model: GATEWAY_MODEL };
+  const installedModel = journal.installed.model;
+  const previousModel = journal.previous?.model;
+  let changed = false;
+  if (current?.line === installedModel && parseTomlStringAssignment(installedModel, 'model') === GATEWAY_MODEL) {
+    if (previousModel?.line && !parseTomlStringAssignment(previousModel.line, 'model')?.startsWith(ROUTER_MODEL_PREFIX)) {
+      lines[current.index] = previousModel.line;
+    } else {
+      lines.splice(current.index, 1);
+    }
+    const rendered = `${lines.join('\n')}${hadTrailingNewline || lines.length ? '\n' : ''}`;
+    writeTextAtomic(journal.configPath, rendered, 0o600);
+    changed = true;
   }
-
-  const currentModel = parseTomlStringAssignment(current?.line, 'model');
-  const previousModel = currentModel && !currentModel.startsWith(ROUTER_MODEL_PREFIX)
-    ? current
-    : journal.previous?.model ?? null;
-
-  setTopLevel(lines, 'model', target);
-  const rendered = `${lines.join('\n')}${hadTrailingNewline || lines.length ? '\n' : ''}`;
-  writeTextAtomic(journal.configPath, rendered, 0o600);
+  const { model: _legacyModel, ...installed } = journal.installed;
   const nextJournal = {
     ...journal,
-    version: 2,
-    previous: { ...(journal.previous || {}), model: previousModel },
-    installed: { ...(journal.installed || {}), model: target },
+    version: 3,
+    installed,
   };
   writeJsonAtomic(integrationJournalPath(), nextJournal);
-  return { changed: true, model: GATEWAY_MODEL, previousModel: currentModel ?? null };
+  return { changed, model: parseTomlStringAssignment(findTopLevel(lines, 'model')?.line, 'model') ?? null };
 }
 
 export function integrationStatus() {
