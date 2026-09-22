@@ -1,5 +1,6 @@
 // Architecture adapted from miuuyy/codex-chatgpt-web (MIT). See THIRD_PARTY_NOTICES.md.
 import http from 'node:http';
+import https from 'node:https';
 import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { brotliDecompressSync, gunzipSync, inflateSync, zstdDecompressSync } from 'node:zlib';
@@ -187,19 +188,24 @@ export function startRouter({
       }));
     }
   });
-  server.on('upgrade', (req, socket) => {
+  server.on('upgrade', (req, socket, head) => {
     upgradedSockets.add(socket);
     const forgetSocket = () => upgradedSockets.delete(socket);
     socket.once('close', forgetSocket);
     socket.once('error', forgetSocket);
     const requestId = crypto.randomUUID();
+    const startedAt = Date.now();
     if (req.url?.split('?')[0] !== '/v1/responses') {
       void emitRequest(onRequest, { requestId, account: null, endpoint: req.url?.split('?')[0] || null, model: null, status: 404, transport: 'websocket-negotiation', method: 'GET', durationMs: 0, attempts: [] });
       socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
       return;
     }
-    void emitRequest(onRequest, { requestId, account: null, endpoint: 'responses', model: null, status: 426, transport: 'websocket-negotiation', method: 'GET', durationMs: 0, attempts: [] });
-    socket.end('HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 0\r\n\r\n');
+    if (String(req.headers.upgrade || '').toLowerCase() !== 'websocket') {
+      void emitRequest(onRequest, { requestId, account: null, endpoint: 'responses', model: null, status: 426, transport: 'websocket-negotiation', method: 'GET', durationMs: Date.now() - startedAt, attempts: [] });
+      socket.end('HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      return;
+    }
+    void proxyOfficialWebSocket({ req, socket, head, officialBase: officialUpstreamBase, onRequest, requestId, startedAt });
   });
   server.closeRouterConnections = () => {
     for (const socket of upgradedSockets) socket.destroy();
@@ -409,6 +415,68 @@ async function forwardOfficial({ req, body, officialBase, forceRefresh }) {
   if (auth?.accountId) headers.set('chatgpt-account-id', auth.accountId);
   const target = officialTarget(officialBase, req.url || '/');
   return fetch(target, { method: req.method, headers, body: body?.length ? body : undefined });
+}
+
+async function proxyOfficialWebSocket({ req, socket, head, officialBase, onRequest, requestId, startedAt }) {
+  let upstreamRequest;
+  let responseStarted = false;
+  try {
+    const auth = await officialAuth({ incomingAuthorization: req.headers.authorization });
+    const target = officialTarget(officialBase, req.url || '/');
+    const headers = { ...req.headers };
+    delete headers.host;
+    delete headers.authorization;
+    delete headers['chatgpt-account-id'];
+    if (auth?.accessToken) headers.authorization = `Bearer ${auth.accessToken}`;
+    if (auth?.accountId) headers['chatgpt-account-id'] = auth.accountId;
+
+    const transport = target.protocol === 'https:' ? https : target.protocol === 'http:' ? http : null;
+    if (!transport) throw new Error(`Unsupported official upstream protocol: ${target.protocol}`);
+    upstreamRequest = transport.request(target, { method: 'GET', headers });
+
+    upstreamRequest.once('upgrade', async (response, upstreamSocket, upstreamHead) => {
+      responseStarted = true;
+      writeUpgradeResponse(socket, response);
+      if (upstreamHead.length) socket.write(upstreamHead);
+      if (head?.length) upstreamSocket.write(head);
+      await emitRequest(onRequest, { requestId, account: null, endpoint: 'responses', model: null, status: response.statusCode || 101, transport: 'official-websocket', method: 'GET', durationMs: Date.now() - startedAt, attempts: [] });
+      socket.pipe(upstreamSocket);
+      upstreamSocket.pipe(socket);
+      upstreamSocket.once('error', () => socket.destroy());
+      socket.once('error', () => upstreamSocket.destroy());
+    });
+
+    upstreamRequest.once('response', async response => {
+      responseStarted = true;
+      const status = response.statusCode || 502;
+      writeUpgradeResponse(socket, response);
+      await emitRequest(onRequest, { requestId, account: null, endpoint: 'responses', model: null, status, transport: 'official-websocket', method: 'GET', durationMs: Date.now() - startedAt, attempts: [] });
+      response.pipe(socket);
+    });
+
+    upstreamRequest.once('error', async error => {
+      if (responseStarted) return;
+      await emitRequest(onRequest, { requestId, account: null, endpoint: 'responses', model: null, status: 502, transport: 'official-websocket', method: 'GET', durationMs: Date.now() - startedAt, attempts: [], error: sanitizeLogText(error?.message || String(error)) });
+      if (!socket.destroyed) socket.end('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+    });
+
+    socket.once('close', () => upstreamRequest?.destroy());
+    socket.once('error', () => upstreamRequest?.destroy());
+    upstreamRequest.end();
+  } catch (error) {
+    await emitRequest(onRequest, { requestId, account: null, endpoint: 'responses', model: null, status: 502, transport: 'official-websocket', method: 'GET', durationMs: Date.now() - startedAt, attempts: [], error: sanitizeLogText(error?.message || String(error)) });
+    if (!socket.destroyed) socket.end('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+  }
+}
+
+function writeUpgradeResponse(socket, response) {
+  const status = response.statusCode || 502;
+  const statusMessage = response.statusMessage || 'Bad Gateway';
+  const lines = [`HTTP/1.1 ${status} ${statusMessage}`];
+  for (let index = 0; index < response.rawHeaders.length; index += 2) {
+    lines.push(`${response.rawHeaders[index]}: ${response.rawHeaders[index + 1]}`);
+  }
+  socket.write(`${lines.join('\r\n')}\r\n\r\n`);
 }
 
 async function officialAuth({ force = false, incomingAuthorization }) {
