@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -64,21 +65,128 @@ test('responses capability negotiation falls back from WebSocket to HTTP/SSE', a
   }
 });
 
-test('responses WebSocket upgrade is rejected so gateway requests use routable HTTP/SSE', async () => {
+test('responses WebSocket upgrade is proxied to the official upstream with main Codex auth', async () => {
   const state = await fixture();
-  const router = startRouter({ port: 0 });
+  const previousCodexHome = process.env.CODEX_HOME;
+  const mainHome = path.join(state.root, 'main-codex-home');
+  const accessToken = jwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+  fs.mkdirSync(mainHome, { recursive: true });
+  writeJsonAtomic(path.join(mainHome, 'auth.json'), {
+    tokens: { id_token: jwt({}), access_token: accessToken, refresh_token: 'main-refresh', account_id: 'main-account' },
+  });
+  process.env.CODEX_HOME = mainHome;
+  let seen = null;
+  const events = [];
+  let upstreamSocket = null;
+  const upstream = http.createServer();
+  upstream.on('upgrade', (req, socket) => {
+    seen = {
+      url: req.url,
+      authorization: req.headers.authorization,
+      accountId: req.headers['chatgpt-account-id'],
+      upgrade: req.headers.upgrade,
+    };
+    upstreamSocket = socket;
+    const accept = crypto.createHash('sha1')
+      .update(`${req.headers['sec-websocket-key']}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest('base64');
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    socket.on('data', chunk => socket.write(chunk));
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({
+    port: 0,
+    officialUpstreamBase: `http://127.0.0.1:${upstream.address().port}/backend-api/codex`,
+    onRequest: event => events.push(event),
+  });
   await once(router, 'listening');
   try {
-    const response = await new Promise((resolve, reject) => {
-      const request = http.request({ port: router.address().port, path: '/v1/responses', headers: { connection: 'Upgrade', upgrade: 'websocket', 'sec-websocket-key': 'test-key', 'sec-websocket-version': '13' } });
-      request.once('upgrade', (_response, socket) => { socket.destroy(); reject(new Error('unexpected websocket upgrade')); });
-      request.once('response', resolve);
+    const { response, socket } = await new Promise((resolve, reject) => {
+      const request = http.request({
+        port: router.address().port,
+        path: '/v1/responses?transport=websocket',
+        headers: {
+          authorization: 'Bearer incoming-codex-token',
+          connection: 'Upgrade',
+          upgrade: 'websocket',
+          'sec-websocket-key': crypto.randomBytes(16).toString('base64'),
+          'sec-websocket-version': '13',
+        },
+      });
+      request.once('upgrade', (upstreamResponse, clientSocket) => resolve({ response: upstreamResponse, socket: clientSocket }));
+      request.once('response', incoming => reject(new Error(`unexpected HTTP response: ${incoming.statusCode}`)));
       request.once('error', reject);
       request.end();
     });
-    assert.equal(response.statusCode, 426);
+    assert.equal(response.statusCode, 101);
+    assert.deepEqual(seen, {
+      url: '/backend-api/codex/responses?transport=websocket',
+      authorization: `Bearer ${accessToken}`,
+      accountId: 'main-account',
+      upgrade: 'websocket',
+    });
+    assert.deepEqual(events.map(event => [event.transport, event.status]), [['official-websocket', 101]]);
+    const echo = new Promise(resolve => socket.once('data', resolve));
+    socket.write('websocket-data');
+    assert.equal((await echo).toString(), 'websocket-data');
+    socket.destroy();
   } finally {
+    router.closeRouterConnections();
     await new Promise(resolve => router.close(resolve));
+    upstreamSocket?.destroy();
+    await new Promise(resolve => upstream.close(resolve));
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+    state.restore();
+  }
+});
+
+test('responses WebSocket upstream rejection is forwarded to the Codex client', async () => {
+  const state = await fixture();
+  const previousCodexHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = path.join(state.root, 'empty-main-codex-home');
+  let upstreamSocket = null;
+  const upstream = http.createServer();
+  upstream.on('upgrade', (_req, socket) => {
+    upstreamSocket = socket;
+    socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: 7\r\n\r\nblocked');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({
+    port: 0,
+    officialUpstreamBase: `http://127.0.0.1:${upstream.address().port}/backend-api/codex`,
+  });
+  await once(router, 'listening');
+  try {
+    const response = await new Promise((resolve, reject) => {
+      const request = http.request({
+        port: router.address().port,
+        path: '/v1/responses',
+        headers: {
+          connection: 'Upgrade',
+          upgrade: 'websocket',
+          'sec-websocket-key': crypto.randomBytes(16).toString('base64'),
+          'sec-websocket-version': '13',
+        },
+      });
+      request.once('response', resolve);
+      request.once('upgrade', (_incoming, socket) => { socket.destroy(); reject(new Error('unexpected successful upgrade')); });
+      request.once('error', reject);
+      request.end();
+    });
+    assert.equal(response.statusCode, 403);
+    let body = '';
+    for await (const chunk of response) body += chunk.toString();
+    assert.equal(body, 'blocked');
+  } finally {
+    router.closeRouterConnections();
+    await new Promise(resolve => router.close(resolve));
+    upstreamSocket?.destroy();
+    await new Promise(resolve => upstream.close(resolve));
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
     state.restore();
   }
 });
