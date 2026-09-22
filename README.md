@@ -79,7 +79,7 @@ export CODEXROUTER_JEV_MODE=observe
 export CODEXROUTER_JEV_MODEL=jev-1.13.0
 ```
 
-`observe` records a typed recommendation without changing the routed model. `active` may apply a high-confidence model tier and reasoning effort. When CodexRouter is installed, `codexrouter/gateway` is managed as the Codex default model so Jev-enabled requests actually enter the semantic routing path; the previous native default is preserved and restored on uninstall.
+`observe` records a typed recommendation without changing the routed model. `active` may apply a high-confidence model tier and reasoning effort to requests sent through Router. CodexRouter leaves the global Codex model default unchanged for ChatGPT account compatibility; select **Router** in Codex when you want requests to enter the semantic routing path.
 
 The desktop app also provides cost controls: `Economy`, `Balanced`, and `Full` context profiles; a maximum context ceiling; sampling; and an in-process decision cache. `Economy` is the default and sends only the latest useful request with the smallest decision rubric. You can also enable Jev account recommendations in `observe` or `active`; the Router still filters disabled, cooldown and quota-ineligible accounts first, and Jev can only recommend from an allowlist of already-eligible candidates. Model and account allowlists are hard policy gates. Explicit native model choices still bypass Jev and are reported as bypasses in Activity.
 

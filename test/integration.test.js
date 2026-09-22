@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ensureGatewayDefaultModel, installIntegration, integrationStatus, uninstallIntegration } from '../src/integration.js';
+import { installIntegration, integrationStatus, migrateGatewayDefaultModel, uninstallIntegration } from '../src/integration.js';
 
 function withIntegrationFixture(initialConfig, run) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codexrouter-int-'));
@@ -24,52 +24,70 @@ function withIntegrationFixture(initialConfig, run) {
   }
 }
 
-test('integration patches and restores unrelated native Codex config lines', () => {
+test('integration preserves the native global model while exposing the Router catalog', () => {
   withIntegrationFixture('model = "gpt-native"\n[features]\nfoo = true\n', ({ codexHome }) => {
     installIntegration({ port: 19001 });
     const installed = fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8');
     assert.match(installed, /openai_base_url = "http:\/\/127\.0\.0\.1:19001\/v1"/);
     assert.match(installed, /model_catalog_json = /);
-    assert.match(installed, /^model = "codexrouter\/gateway"$/m);
-    assert.equal(integrationStatus().gatewayDefault, true);
+    assert.match(installed, /^model = "gpt-native"$/m);
+    assert.equal(integrationStatus().gatewayDefault, false);
     uninstallIntegration();
     const restored = fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8');
     assert.equal(restored, 'model = "gpt-native"\n[features]\nfoo = true\n');
   });
 });
 
-test('legacy integration can migrate a native model to the Jev gateway and restore it later', () => {
+test('legacy Router global default migrates back to the native model and stays out of the journal', () => {
   withIntegrationFixture('model = "gpt-5.6-sol"\n[features]\nfoo = true\n', ({ codexHome, routerHome }) => {
     const configPath = path.join(codexHome, 'config.toml');
     installIntegration({ port: 19001 });
 
     const journalPath = path.join(routerHome, 'integration.json');
     const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
-    delete journal.previous.model;
-    delete journal.installed.model;
-    journal.version = 1;
+    journal.previous.model = { index: 0, line: 'model = "gpt-5.6-sol"' };
+    journal.installed.model = 'model = "codexrouter/gateway"';
+    journal.version = 2;
     fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
 
-    const legacyConfig = fs.readFileSync(configPath, 'utf8').replace(
-      'model = "codexrouter/gateway"',
-      'model = "gpt-5.6-sol"',
-    );
+    const legacyConfig = fs.readFileSync(configPath, 'utf8').replace('model = "gpt-5.6-sol"', 'model = "codexrouter/gateway"');
     fs.writeFileSync(configPath, legacyConfig);
 
     const before = integrationStatus();
     assert.equal(before.installed, true);
-    assert.equal(before.gatewayDefault, false);
-    assert.equal(before.activeModel, 'gpt-5.6-sol');
+    assert.equal(before.gatewayDefault, true);
+    assert.equal(before.activeModel, 'codexrouter/gateway');
 
-    const repair = ensureGatewayDefaultModel();
-    assert.equal(repair.changed, true);
-    assert.equal(repair.previousModel, 'gpt-5.6-sol');
-    assert.match(fs.readFileSync(configPath, 'utf8'), /^model = "codexrouter\/gateway"$/m);
-    assert.equal(integrationStatus().gatewayDefault, true);
+    const migration = migrateGatewayDefaultModel();
+    assert.equal(migration.changed, true);
+    assert.equal(migration.model, 'gpt-5.6-sol');
+    assert.match(fs.readFileSync(configPath, 'utf8'), /^model = "gpt-5.6-sol"$/m);
+    assert.equal(integrationStatus().gatewayDefault, false);
+    assert.equal('model' in JSON.parse(fs.readFileSync(journalPath, 'utf8')).installed, false);
 
     uninstallIntegration();
     const restored = fs.readFileSync(configPath, 'utf8');
     assert.equal(restored, 'model = "gpt-5.6-sol"\n[features]\nfoo = true\n');
+  });
+});
+
+test('legacy migration preserves a model the user changed after installation', () => {
+  withIntegrationFixture('model = "gpt-5.6-sol"\n', ({ codexHome, routerHome }) => {
+    const configPath = path.join(codexHome, 'config.toml');
+    installIntegration({ port: 19001 });
+    const journalPath = path.join(routerHome, 'integration.json');
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
+    journal.installed.model = 'model = "codexrouter/gateway"';
+    journal.previous.model = { index: 0, line: 'model = "gpt-5.6-sol"' };
+    fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+    fs.writeFileSync(configPath, fs.readFileSync(configPath, 'utf8').replace('gpt-5.6-sol', 'gpt-6.1-sol'));
+
+    const migration = migrateGatewayDefaultModel();
+    assert.equal(migration.changed, false);
+    assert.equal(migration.model, 'gpt-6.1-sol');
+    assert.match(fs.readFileSync(configPath, 'utf8'), /^model = "gpt-6.1-sol"$/m);
+    uninstallIntegration();
+    assert.match(fs.readFileSync(configPath, 'utf8'), /^model = "gpt-6.1-sol"$/m);
   });
 });
 
