@@ -1,7 +1,7 @@
 import { freshAuth } from './auth.js';
 
 const DEFAULT_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
-const CACHE_TTL_MS = Number(process.env.CODEXROUTER_USAGE_CACHE_MS || 60_000);
+const CACHE_TTL_MS = Number(process.env.CODEXROUTER_USAGE_CACHE_MS || 15_000);
 const cache = new Map();
 
 export async function getAccountUsage(account, { force = false, fetchImpl = fetch } = {}) {

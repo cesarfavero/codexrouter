@@ -147,7 +147,8 @@ export function loginInteractive(codexHome, {
         return;
       }
       const suffix = signal ? ` (signal ${signal})` : '';
-      finish(() => reject(new Error(`codex login exited with code ${code ?? 'unknown'}${suffix}.`)));
+      const detail = sanitizeLoginOutput(combined);
+      finish(() => reject(new Error(`codex login exited with code ${code ?? 'unknown'}${suffix}.${detail ? ` ${detail}` : ''}`)));
     });
 
     onState?.('starting');
@@ -156,6 +157,16 @@ export function loginInteractive(codexHome, {
       finish(() => reject(new Error('Codex login timed out before authentication completed.')));
     }, timeout);
   });
+}
+
+function sanitizeLoginOutput(output) {
+  const lines = String(output || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const useful = lines.filter(line => !/https:\/\/auth\.openai\.com\//i.test(line));
+  if (!useful.length) return '';
+  return useful.slice(-4).join(' ').slice(-800)
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(/https?:\/\/\S+/gi, '[URL_REDACTED]')
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[REDACTED_JWT]');
 }
 
 export function login(codexHome) {
