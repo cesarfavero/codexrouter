@@ -170,11 +170,13 @@ test('explicit native model bypasses Jev semantic routing', async () => {
     calls += 1;
     return { status: 'ok' };
   };
+  const events = [];
   const router = startRouter({
     port: 0,
     upstreamBase: `http://127.0.0.1:${upstream.server.address().port}`,
     usageReader: async () => ({ status: 'available' }),
     jevAdvisor: semantic,
+    onRequest: event => events.push(event),
   });
   await once(router, 'listening');
 
@@ -188,6 +190,8 @@ test('explicit native model bypasses Jev semantic routing', async () => {
     await response.text();
     assert.equal(calls, 0);
     assert.equal(upstream.seen.model, 'gpt-5.6-luna');
+    assert.equal(events[0].jev.mode, 'active');
+    assert.equal(events[0].jev.status, 'bypassed-explicit-model');
   } finally {
     await new Promise(resolve => router.close(resolve));
     await new Promise(resolve => upstream.server.close(resolve));

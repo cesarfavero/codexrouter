@@ -122,7 +122,7 @@ function createDesktopJevAdvisor(jev) {
 }
 
 async function applyJevSettings(raw) {
-  const { jev } = await core();
+  const { jev, integration } = await core();
   const current = loadJevSettings();
   const mode = String(raw?.mode || 'off').trim().toLowerCase();
   if (!JEV_MODES.has(mode)) throw new Error('Jev mode must be off, observe, or active.');
@@ -157,6 +157,11 @@ async function applyJevSettings(raw) {
   }
 
   saveJevSettings(next);
+  let gatewayRepair = null;
+  if (mode !== 'off') {
+    const integrationState = integration.integrationStatus();
+    if (integrationState.installed) gatewayRepair = integration.ensureGatewayDefaultModel();
+  }
   const wasRunning = Boolean(routerServer?.listening);
   const restartPort = routerPort;
   if (wasRunning) {
@@ -165,7 +170,12 @@ async function applyJevSettings(raw) {
   }
   const summary = desktopJevSummary(jev);
   const modelPolicy = summary.allowedModels === null ? 'all models eligible' : `${summary.allowedModels.length} model(s) eligible`;
-  record('info', `Jev semantic routing saved: ${summary.mode} · ${summary.configured ? 'configured' : 'no API key'} · ${summary.model} · ${modelPolicy}.`);
+  const gatewayNote = mode === 'off'
+    ? ''
+    : gatewayRepair?.changed
+      ? ' · Codex default repaired to Router gateway'
+      : ' · Router gateway default confirmed';
+  record('info', `Jev semantic routing saved: ${summary.mode} · ${summary.configured ? 'configured' : 'no API key'} · ${summary.model} · ${modelPolicy}${gatewayNote}.`);
   sendEvent({ type: 'snapshot-invalidated' });
   return snapshot();
 }
@@ -307,7 +317,12 @@ async function snapshot() {
     packaged: app.isPackaged,
     accounts,
     defaultAccountId: registry.defaultAccountId,
-    integration: { installed: installed.installed, port: installed.journal?.port ?? DEFAULT_PORT },
+    integration: {
+      installed: installed.installed,
+      port: installed.journal?.port ?? DEFAULT_PORT,
+      activeModel: installed.activeModel ?? null,
+      gatewayDefault: installed.gatewayDefault === true,
+    },
     runtime: { running: Boolean(routerServer?.listening), port: routerPort },
     autostart: getAutostart(app),
     jev: desktopJevSummary(jev),
@@ -329,9 +344,19 @@ async function snapshot() {
 
 async function startRuntime(preferredPort) {
   if (routerServer?.listening) return snapshot();
-  const { router, jev } = await core();
+  const { router, jev, integration } = await core();
   routerPort = Number(preferredPort || DEFAULT_PORT);
-  const jevAdvisor = createDesktopJevAdvisor(jev);
+  const jevConfig = desktopJevConfig(jev);
+  if (jevConfig.mode !== 'off') {
+    const integrationState = integration.integrationStatus();
+    if (integrationState.installed && !integrationState.gatewayDefault) {
+      const repair = integration.ensureGatewayDefaultModel();
+      if (repair.changed) {
+        record('info', `Jev is ${jevConfig.mode}; repaired Codex default model to codexrouter/gateway so semantic routing can run.`);
+      }
+    }
+  }
+  const jevAdvisor = jev.createJevAdvisor({ config: jevConfig });
   let server = router.startRouter({
     port: routerPort,
     jevAdvisor,

@@ -40,7 +40,15 @@ export function startRouter({
     try {
       if (req.method === 'GET' && req.url === '/health') {
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, service: 'codexrouter', model: GATEWAY_SLUG, jev: jevAdvisor?.status?.() ?? { mode: 'off', configured: false } }));
+        res.end(JSON.stringify({
+          ok: true,
+          service: 'codexrouter',
+          model: GATEWAY_SLUG,
+          jev: {
+            ...(jevAdvisor?.status?.() ?? { mode: 'off', configured: false }),
+            requiresModel: GATEWAY_SLUG,
+          },
+        }));
         return;
       }
       if (req.method === 'GET' && (req.url === '/v1/models' || req.url?.startsWith('/v1/models?'))) {
@@ -81,6 +89,17 @@ export function startRouter({
         explicitAccountModel = Boolean(qualified);
         const requestedModel = parsed?.model;
         gatewayRequest = isGatewaySlug(requestedModel) || Boolean(qualified) || typeof requestedModel === 'string';
+        if (jevAdvisor?.mode !== 'off' && gatewayRequest && !isGatewaySlug(requestedModel)) {
+          jevDecision = {
+            status: qualified ? 'bypassed-account-model' : 'bypassed-explicit-model',
+          };
+          jevRouting = {
+            mode: jevAdvisor.mode,
+            applicable: false,
+            applyModel: false,
+            applyEffort: false,
+          };
+        }
         if (gatewayRequest) {
           if (qualified) {
             account = allAccounts().find(candidate => candidate.id === qualified.accountId);
