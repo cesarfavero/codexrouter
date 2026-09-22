@@ -38,22 +38,20 @@ Open Codex
 select a Codex model
 ```
 
-Native Codex models remain visible in Codex. Select **CodexRouter** when you want the managed gateway to choose the active healthy account and switch automatically when its usage is exhausted or nearly exhausted; account management and effort controls stay in the CodexRouter app.
+Native Codex models remain visible in Codex. Select **Router** when you want the managed gateway to choose the active healthy account and switch automatically when its usage is exhausted or nearly exhausted; account management and effort controls stay in the CodexRouter app.
 
 ## Gateway behavior
 
 The generated Codex catalog contains the managed gateway plus the visible native models from the active account:
 
 ```text
-slug: codexrouter/gateway
-display: CodexRouter
-gpt-5.5
-gpt-5.6-sol
+codexrouter/gateway (Router)
+all list-visible native models reported by the active account's Codex CLI
 ```
 
 The picker displays the native models with a short `Router ·` label, while keeping their native slugs for compatibility. The `Router` model is the automatic account-switching entry point.
 
-For the active account, CodexRouter discovers the real list-visible models through the installed Codex CLI and selects a valid native model. A request then becomes:
+For each account, CodexRouter discovers list-visible models through that account's installed Codex CLI. It honors a valid manually selected model; automatic selection prefers an efficient variant exposed by the catalog, then another available model. A request then becomes:
 
 ```text
 Codex request
@@ -62,7 +60,7 @@ model = codexrouter/gateway
 CodexRouter
         ↓
 active account = Cesar
-native model = gpt-5.6-sol
+native model = selected from the active account's available catalog
         ↓
 official Codex backend
 ```
@@ -169,7 +167,7 @@ CODEX_BIN=/path/to/codex npm run desktop:dev
 5. Add any other authorized accounts.
 6. Choose **Use for gateway** on the account you want active.
 7. Open **Setup** and click **Install & start**.
-8. Restart/open Codex and select **CodexRouter** for automatic account switching, or choose a native Codex model directly.
+8. Restart/open Codex and select **Router** for automatic account switching, or choose a native Codex model directly.
 
 The integration manages only these top-level Codex settings:
 
