@@ -17,6 +17,7 @@ const HOP_BY_HOP = new Set([
 ]);
 const MAX_DECODED_REQUEST_BYTES = 128 * 1024 * 1024;
 const HEADROOM_TIE_MARGIN = 5;
+const FRESH_USAGE_THRESHOLD_PERCENT = 10;
 
 export function startRouter({
   port = 17842,
@@ -85,7 +86,7 @@ export function startRouter({
             account = allAccounts().find(candidate => candidate.id === qualified.accountId);
             if (!account || account.enabled === false) throw httpError(400, `CodexRouter account is disabled: ${requestedModel}`);
             let usage = await readUsageSafely(usageReader, account);
-            if (!usageIsHealthy(usage)) usage = await readUsageSafely(usageReader, account, { force: true });
+            if (usageNeedsFreshRead(usage)) usage = await readUsageSafely(usageReader, account, { force: true });
             if (!usageIsHealthy(usage)) throw cooldownError(account, usage);
             parsed.model = qualified.modelSlug;
           } else {
@@ -162,12 +163,13 @@ export function startRouter({
     socket.once('close', forgetSocket);
     socket.once('error', forgetSocket);
     const requestId = crypto.randomUUID();
-    void proxyOfficialUpgrade({ req, socket, officialBase: officialUpstreamBase })
-      .then(() => emitRequest(onRequest, { requestId, account: null, endpoint: req.url?.split('?')[0] || null, model: null, status: 101, transport: 'official-websocket', method: 'GET', durationMs: 0, attempts: [] }))
-      .catch(error => {
-        void emitRequest(onRequest, { requestId, account: null, endpoint: req.url?.split('?')[0] || null, model: null, status: 502, transport: 'official-websocket', method: 'GET', durationMs: 0, attempts: [], error: sanitizeLogText(error?.message || String(error)) });
-        socket.destroy();
-      });
+    if (req.url?.split('?')[0] !== '/v1/responses') {
+      void emitRequest(onRequest, { requestId, account: null, endpoint: req.url?.split('?')[0] || null, model: null, status: 404, transport: 'websocket-negotiation', method: 'GET', durationMs: 0, attempts: [] });
+      socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+      return;
+    }
+    void emitRequest(onRequest, { requestId, account: null, endpoint: 'responses', model: null, status: 426, transport: 'websocket-negotiation', method: 'GET', durationMs: 0, attempts: [] });
+    socket.end('HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 0\r\n\r\n');
   });
   server.closeRouterConnections = () => {
     for (const socket of upgradedSockets) socket.destroy();
@@ -251,12 +253,16 @@ async function selectGatewayAccount(active, usageReader, { force = false, exclud
     .filter(account => account?.enabled !== false)
     .filter((account, index, list) => !exclude.has(account.id) && list.findIndex(item => item.id === account.id) === index);
   const healthy = [];
+  let refreshAll = force;
   for (const account of candidates) {
-    let usage = await readUsageSafely(usageReader, account, { force });
+    let usage = await readUsageSafely(usageReader, account, { force: refreshAll });
     // Usage is advisory telemetry and can briefly lag behind the real
     // allowance. Never turn one cached snapshot into a hard 429 without a
     // fresh read first.
-    if (!force && !usageIsHealthy(usage)) usage = await readUsageSafely(usageReader, account, { force: true });
+    if (usageNeedsFreshRead(usage)) {
+      refreshAll = true;
+      usage = await readUsageSafely(usageReader, account, { force: true });
+    }
     if (usageIsHealthy(usage)) {
       healthy.push({
         account,
@@ -306,6 +312,12 @@ function usageIsHealthy(usage) {
   return Boolean(usage)
     && usage.status === 'available'
     && usage.limitReached !== true;
+}
+
+function usageNeedsFreshRead(usage) {
+  if (!usageIsHealthy(usage)) return true;
+  const primaryRemaining = usage.primary?.remainingPercent;
+  return Number.isFinite(primaryRemaining) && primaryRemaining <= FRESH_USAGE_THRESHOLD_PERCENT;
 }
 
 function cooldownError(account, usage) {
@@ -363,32 +375,6 @@ async function forwardOfficial({ req, body, officialBase, forceRefresh }) {
 async function officialAuth({ force = false, incomingAuthorization }) {
   try { return freshAuth(mainCodexHome(), { force }); }
   catch { return incomingAuthorization ? { accessToken: incomingAuthorization.replace(/^Bearer\s+/i, '') } : null; }
-}
-
-async function proxyOfficialUpgrade({ req, socket, officialBase }) {
-  const target = officialTarget(officialBase, req.url || '/');
-  const auth = await officialAuth({ incomingAuthorization: req.headers.authorization });
-  const transport = target.protocol === 'https:' ? await import('node:tls') : await import('node:net');
-  const upstream = target.protocol === 'https:'
-    ? transport.connect({ host: target.hostname, port: Number(target.port || 443), servername: target.hostname })
-    : transport.connect(Number(target.port || 80), target.hostname);
-  await new Promise((resolve, reject) => {
-    const fail = error => { upstream.destroy(); reject(error); };
-    upstream.once('error', fail);
-    upstream.once(target.protocol === 'https:' ? 'secureConnect' : 'connect', () => {
-      const headers = [];
-      for (const [name, value] of Object.entries(req.headers)) {
-        if (value == null || ['host', 'authorization', 'chatgpt-account-id'].includes(name.toLowerCase())) continue;
-        headers.push(`${name}: ${Array.isArray(value) ? value.join(', ') : value}`);
-      }
-      headers.push(`Host: ${target.host}`);
-      if (auth?.accessToken) headers.push(`Authorization: Bearer ${auth.accessToken}`);
-      if (auth?.accountId) headers.push(`chatgpt-account-id: ${auth.accountId}`);
-      upstream.write(`${req.method} ${target.pathname}${target.search} HTTP/1.1\r\n${headers.join('\r\n')}\r\n\r\n`);
-      upstream.pipe(socket).pipe(upstream);
-      resolve();
-    });
-  });
 }
 
 function stripVersionPrefix(url) {

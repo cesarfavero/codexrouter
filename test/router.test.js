@@ -64,6 +64,25 @@ test('responses capability negotiation falls back from WebSocket to HTTP/SSE', a
   }
 });
 
+test('responses WebSocket upgrade is rejected so gateway requests use routable HTTP/SSE', async () => {
+  const state = await fixture();
+  const router = startRouter({ port: 0 });
+  await once(router, 'listening');
+  try {
+    const response = await new Promise((resolve, reject) => {
+      const request = http.request({ port: router.address().port, path: '/v1/responses', headers: { connection: 'Upgrade', upgrade: 'websocket', 'sec-websocket-key': 'test-key', 'sec-websocket-version': '13' } });
+      request.once('upgrade', (_response, socket) => { socket.destroy(); reject(new Error('unexpected websocket upgrade')); });
+      request.once('response', resolve);
+      request.once('error', reject);
+      request.end();
+    });
+    assert.equal(response.statusCode, 426);
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    state.restore();
+  }
+});
+
 test('router passes unknown Codex routes through to the official upstream', async () => {
   const state = await fixture();
   let seen = null;

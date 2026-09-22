@@ -182,8 +182,13 @@ function record(level, message, details = null) {
   return item;
 }
 
-function recordRouterRequest(event) {
+async function recordRouterRequest(event) {
   if (event.usageOnly) {
+    if (event.account?.id) {
+      const { usage } = await core();
+      usage.invalidateAccountUsage(event.account.id);
+      sendEvent({ type: 'snapshot-invalidated' });
+    }
     const usage = event.usage || {};
     record('info', `Usage ${event.requestId || 'unknown'} → ${event.account?.label || 'no account'} · ${event.model || event.endpoint} · ${usage.totalTokens ?? '—'} tokens (${usage.inputTokens ?? '—'} in / ${usage.outputTokens ?? '—'} out).`, { ...event, account: event.account ? { id: event.account.id, label: event.account.label } : null });
     return;

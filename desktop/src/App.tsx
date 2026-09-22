@@ -32,7 +32,8 @@ export function App() {
   useEffect(() => {
     if (!api) return;
     void refresh().catch(cause => setError(messageOf(cause)));
-    return api.onEvent((event: LauncherEvent) => {
+    const refreshInterval = window.setInterval(() => void refresh().catch(cause => setError(messageOf(cause))), 15_000);
+    const unsubscribe = api.onEvent((event: LauncherEvent) => {
       if (event.type === 'snapshot-invalidated') void refresh().catch(cause => setError(messageOf(cause)));
       if (event.type === 'open-add-account') setAddOpen(true);
       if (event.type === 'operation') setOperation(event.operation);
@@ -44,6 +45,10 @@ export function App() {
       if (event.type === 'update-downloaded') { setUpdateState('ready'); setUpdateProgress(100); }
       if (event.type === 'update-state' && event.state === 'error') setUpdateState('error');
     });
+    return () => {
+      window.clearInterval(refreshInterval);
+      unsubscribe();
+    };
   }, [refresh]);
 
   if (!api) return <FatalState title="Desktop bridge unavailable" body="CodexRouter could not initialize its secure Electron bridge." />;
