@@ -69,6 +69,7 @@ function advisor(mode) {
     researchNeed: 0.2,
     decompositionGain: 0.7,
     failureSignal: 0.1,
+    evaluatorManipulation: 0.01,
     semanticRisk: 1.4,
   };
   return {

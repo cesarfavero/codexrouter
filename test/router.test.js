@@ -494,6 +494,63 @@ test('gateway prioritizes five-hour quota when ranking healthy accounts', async 
   }
 });
 
+test('active Jev account routing selects only from healthy configured candidates', async () => {
+  const state = await fixture();
+  let seen = null;
+  let candidateIds = [];
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    seen = { account: req.headers['chatgpt-account-id'], body: JSON.parse(Buffer.concat(chunks).toString('utf8')) };
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end('data: [DONE]\n\n');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const jevAdvisor = {
+    mode: 'active',
+    status: () => ({ mode: 'active', configured: true }),
+    advise: async ({ accountCandidates }) => {
+      candidateIds = accountCandidates.map(candidate => candidate.account.id);
+      return { status: 'ok', recommendedAccountId: 'cesar', accountConfidence: 0.99 };
+    },
+    resolveAccount: (_candidates, decision) => ({
+      mode: 'active',
+      accountRouting: 'active',
+      recommendedAccountId: decision.recommendedAccountId,
+      accountConfidence: decision.accountConfidence,
+      applyAccount: candidateIds.includes(decision.recommendedAccountId),
+    }),
+    resolve: () => ({ mode: 'active', applyModel: false, applyEffort: false }),
+  };
+  const router = startRouter({
+    port: 0,
+    upstreamBase: `http://127.0.0.1:${upstream.address().port}`,
+    usageReader: async account => account.id === 'eduardo'
+      ? { status: 'available', primary: { remainingPercent: 80 }, secondary: { remainingPercent: 70 } }
+      : { status: 'available', primary: { remainingPercent: 70 }, secondary: { remainingPercent: 60 } },
+    jevAdvisor,
+  });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.deepEqual(candidateIds.sort(), ['cesar', 'eduardo']);
+    assert.equal(seen.account, 'acct-cesar');
+    assert.equal(seen.body.model, 'gpt-5.6-sol');
+    assert.equal((await import('../src/store.js')).defaultAccount().id, 'cesar');
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+    state.restore();
+  }
+});
+
 test('gateway keeps an allowed account with an exhausted secondary window in the ranking', async () => {
   const state = await fixture();
   let seenAccount = null;
