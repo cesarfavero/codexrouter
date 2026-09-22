@@ -37,6 +37,7 @@ For repository work, create/link an Issue, use a branch, make focused commits, o
 - Only `codexrouter/gateway` may be semantically rerouted. Explicit native/account-qualified model selections are user intent and must remain pinned.
 - While the integration is installed, manage `model = "codexrouter/gateway"` as the Codex default and preserve the previous native model transactionally for uninstall/rollback. Legacy journals must remain migratable.
 - Treat the Jev model allowlist as a hard post-decision policy. Disabled model slugs must never be selected by Jev, including during account failover; an empty allowlist means Jev may not override the model at all.
+- Keep Jev context profiles bounded and explicit. Account routing may only recommend among candidates already filtered by deterministic Router checks for enabled status, healthy usage, cooldown and available model; apply the configured account allowlist and confidence/manipulation gates, and preserve deterministic fallback.
 - Never send access tokens, refresh tokens, cookies, raw `auth.json`, account-authentication headers or other known credentials to TypeSafe.
 - Never log the task text sent to Jev. Operational telemetry may contain only structured decisions, latency, token counts and applied/recommended routing metadata.
 - Any Jev outage, timeout, malformed answer, budget limit or low-confidence result must fall back to the deterministic Router behavior.

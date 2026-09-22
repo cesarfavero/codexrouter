@@ -364,8 +364,13 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
   const [effort, setEffort] = useState(active?.preferredEffort ?? 'medium');
   const [saving, setSaving] = useState(false);
   const [jevMode, setJevMode] = useState<'off' | 'observe' | 'active'>(snapshot.jev.mode);
-  const [jevModel, setJevModel] = useState(snapshot.jev.model);
   const [jevConfidence, setJevConfidence] = useState(snapshot.jev.minConfidence);
+  const [jevContextProfile, setJevContextProfile] = useState<'economy' | 'balanced' | 'full'>(snapshot.jev.contextProfile);
+  const [jevAccountRouting, setJevAccountRouting] = useState<'off' | 'observe' | 'active'>(snapshot.jev.accountRouting);
+  const [jevAllowedAccounts, setJevAllowedAccounts] = useState<string[] | null>(snapshot.jev.allowedAccounts);
+  const [jevMaxChars, setJevMaxChars] = useState(snapshot.jev.maxChars);
+  const [jevSampleRate, setJevSampleRate] = useState(snapshot.jev.sampleRate);
+  const [jevCacheTtlMs, setJevCacheTtlMs] = useState(snapshot.jev.cacheTtlMs);
   const [jevAllowedModels, setJevAllowedModels] = useState<string[] | null>(snapshot.jev.allowedModels);
   const [jevKey, setJevKey] = useState('');
   const [jevSaving, setJevSaving] = useState(false);
@@ -377,11 +382,16 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
 
   useEffect(() => {
     setJevMode(snapshot.jev.mode);
-    setJevModel(snapshot.jev.model);
     setJevConfidence(snapshot.jev.minConfidence);
+    setJevContextProfile(snapshot.jev.contextProfile);
+    setJevAccountRouting(snapshot.jev.accountRouting);
+    setJevAllowedAccounts(snapshot.jev.allowedAccounts);
+    setJevMaxChars(snapshot.jev.maxChars);
+    setJevSampleRate(snapshot.jev.sampleRate);
+    setJevCacheTtlMs(snapshot.jev.cacheTtlMs);
     setJevAllowedModels(snapshot.jev.allowedModels);
     setJevKey('');
-  }, [snapshot.jev.mode, snapshot.jev.model, snapshot.jev.minConfidence, snapshot.jev.allowedModels, snapshot.jev.keySource]);
+  }, [snapshot.jev.mode, snapshot.jev.model, snapshot.jev.minConfidence, snapshot.jev.contextProfile, snapshot.jev.accountRouting, snapshot.jev.allowedAccounts, snapshot.jev.allowedModels, snapshot.jev.maxChars, snapshot.jev.sampleRate, snapshot.jev.cacheTtlMs, snapshot.jev.keySource]);
 
   const savePreferences = async () => {
     if (!active || saving) return;
@@ -397,8 +407,13 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
     try {
       await api!.setJevSettings({
         mode: jevMode,
-        model: jevModel.trim(),
         minConfidence: jevConfidence,
+        contextProfile: jevContextProfile,
+        accountRouting: jevAccountRouting,
+        maxChars: jevMaxChars,
+        sampleRate: jevSampleRate,
+        cacheTtlMs: jevCacheTtlMs,
+        allowedAccounts: jevAllowedAccounts,
         allowedModels: jevAllowedModels,
         ...(jevKey.trim() ? { apiKey: jevKey.trim() } : {}),
         ...(options.clearApiKey ? { clearApiKey: true } : {}),
@@ -411,9 +426,16 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
 
   const normalizedJevAllowedModels = jevAllowedModels === null ? null : [...jevAllowedModels].sort();
   const savedJevAllowedModels = snapshot.jev.allowedModels === null ? null : [...snapshot.jev.allowedModels].sort();
+  const normalizedJevAllowedAccounts = jevAllowedAccounts === null ? null : [...jevAllowedAccounts].sort();
+  const savedJevAllowedAccounts = snapshot.jev.allowedAccounts === null ? null : [...snapshot.jev.allowedAccounts].sort();
   const jevChanged = jevMode !== snapshot.jev.mode
-    || jevModel.trim() !== snapshot.jev.model
     || jevConfidence !== snapshot.jev.minConfidence
+    || jevContextProfile !== snapshot.jev.contextProfile
+    || jevAccountRouting !== snapshot.jev.accountRouting
+    || jevMaxChars !== snapshot.jev.maxChars
+    || jevSampleRate !== snapshot.jev.sampleRate
+    || jevCacheTtlMs !== snapshot.jev.cacheTtlMs
+    || JSON.stringify(normalizedJevAllowedAccounts) !== JSON.stringify(savedJevAllowedAccounts)
     || JSON.stringify(normalizedJevAllowedModels) !== JSON.stringify(savedJevAllowedModels)
     || Boolean(jevKey.trim());
 
@@ -424,6 +446,15 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
       return allowed
         ? [...new Set([...baseline, slug])]
         : baseline.filter(item => item !== slug);
+    });
+  };
+  const jevAccountAllowed = (id: string) => jevAllowedAccounts === null || jevAllowedAccounts.includes(id);
+  const setJevAccountAllowed = (id: string, allowed: boolean) => {
+    setJevAllowedAccounts(current => {
+      const baseline = current === null ? snapshot.accounts.map(account => account.id) : current;
+      return allowed
+        ? [...new Set([...baseline, id])]
+        : baseline.filter(item => item !== id);
     });
   };
 
@@ -466,6 +497,55 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
                 : `Bypassed by default model: ${snapshot.integration.activeModel || 'unknown'}`}
           </span>
         </SettingRow>
+        <SettingRow title="Jev context budget" description="Economy sends only the latest useful request and the smallest decision rubric. Balanced adds risk signals; Full keeps the complete rubric for evaluation.">
+          <select aria-label="Jev context budget" disabled={jevSaving} onChange={event => setJevContextProfile(event.target.value as 'economy' | 'balanced' | 'full')} value={jevContextProfile}>
+            <option value="economy">Economy</option>
+            <option value="balanced">Balanced</option>
+            <option value="full">Full</option>
+          </select>
+        </SettingRow>
+        <SettingRow title="Jev context ceiling" description={`Maximum sanitized request text: ${jevMaxChars.toLocaleString()} characters. Economy and Balanced apply their lower profile limits.`}>
+          <input aria-label="Jev context ceiling" disabled={jevSaving} max={100000} min={1000} onChange={event => setJevMaxChars(Number(event.target.value))} step={500} type="number" value={jevMaxChars} />
+          <span className="value-text">{jevMaxChars.toLocaleString()} chars</span>
+        </SettingRow>
+        <SettingRow title="Jev sampling" description="Lower sampling means fewer eligible requests are sent for a semantic decision.">
+          <select aria-label="Jev sampling rate" disabled={jevSaving} onChange={event => setJevSampleRate(Number(event.target.value))} value={jevSampleRate}>
+            <option value={0.1}>10%</option>
+            <option value={0.25}>25%</option>
+            <option value={0.5}>50%</option>
+            <option value={1}>100%</option>
+          </select>
+        </SettingRow>
+        <SettingRow title="Jev decision cache" description="Reuse identical decisions during this window; set to Off to always call TypeSafe.">
+          <select aria-label="Jev decision cache" disabled={jevSaving} onChange={event => setJevCacheTtlMs(Number(event.target.value))} value={jevCacheTtlMs}>
+            <option value={0}>Off</option>
+            <option value={60000}>1 minute</option>
+            <option value={300000}>5 minutes</option>
+            <option value={900000}>15 minutes</option>
+          </select>
+        </SettingRow>
+        <SettingRow title="Jev account routing" description="Router always filters disabled, cooldown, and quota-ineligible accounts first. Jev can only recommend from those candidates.">
+          <select aria-label="Jev account routing mode" disabled={jevSaving || jevMode === 'off'} onChange={event => setJevAccountRouting(event.target.value as 'off' | 'observe' | 'active')} value={jevAccountRouting}>
+            <option value="off">Off</option>
+            <option value="observe">Observe</option>
+            <option value="active">Active</option>
+          </select>
+        </SettingRow>
+        <SettingRow title="Accounts Jev may recommend" description="This is a hard allowlist for Jev only. Router account selection and quota failover remain available for other configured accounts.">
+          <div className="jev-model-policy">
+            <div className="jev-model-policy-actions">
+              <SecondaryButton disabled={jevSaving || jevAllowedAccounts === null} onClick={() => setJevAllowedAccounts(null)}>Allow all</SecondaryButton>
+              <SecondaryButton disabled={jevSaving || jevAllowedAccounts?.length === 0} onClick={() => setJevAllowedAccounts([])}>Disable all</SecondaryButton>
+            </div>
+            {snapshot.accounts.length ? snapshot.accounts.map(account => (
+              <div className="jev-model-policy-row" key={account.id}>
+                <span><strong>{account.label}</strong><code>{account.enabled ? account.usage?.primary?.remainingPercent == null ? 'Quota unknown' : `${Math.round(account.usage.primary.remainingPercent)}% 5h left` : 'Disabled'}</code></span>
+                <Toggle checked={jevAccountAllowed(account.id)} disabled={jevSaving || !account.enabled} label={`Allow Jev to recommend ${account.label}`} onChange={checked => setJevAccountAllowed(account.id, checked)} />
+              </div>
+            )) : <span className="value-text">Add an account to configure account eligibility.</span>}
+            <small>{jevAllowedAccounts === null ? 'All configured, healthy accounts are eligible.' : `${jevAllowedAccounts.length} account(s) explicitly eligible.`}</small>
+          </div>
+        </SettingRow>
         <SettingRow title="TypeSafe API key" description={snapshot.jev.secureStorageAvailable ? 'A new key is encrypted by the operating system and never exposed back to the renderer.' : 'Secure OS storage is unavailable here. Use TYPESAFE_API_KEY instead.'}>
           <input aria-label="TypeSafe API key" autoComplete="off" disabled={!snapshot.jev.secureStorageAvailable || jevSaving} onChange={event => setJevKey(event.target.value)} placeholder={snapshot.jev.configured ? 'Configured · leave blank to keep' : 'Paste a TypeSafe API key'} spellCheck={false} type="password" value={jevKey} />
         </SettingRow>
@@ -474,9 +554,7 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
             ? <SecondaryButton disabled={jevSaving} onClick={() => void saveJev({ clearApiKey: true })}>Clear stored key</SecondaryButton>
             : <span className="value-text">{keyStatus}</span>}
         </SettingRow>
-        <SettingRow title="Jev model" description="Pinned for reproducible routing measurements; change deliberately when evaluating a new Jev version.">
-          <input aria-label="Jev model" disabled={jevSaving} maxLength={120} onChange={event => setJevModel(event.target.value)} spellCheck={false} value={jevModel} />
-        </SettingRow>
+        <SettingRow title="Jev runtime" description="Version is pinned internally for consistent routing measurements."><code>{snapshot.jev.model}</code></SettingRow>
         <SettingRow title="Jev confidence gate" description="Active mode changes model or effort only when the corresponding typed decision meets this threshold.">
           <input aria-label="Jev minimum confidence" disabled={jevSaving} max={1} min={0} onChange={event => setJevConfidence(Number(event.target.value))} step={0.01} type="number" value={jevConfidence} />
         </SettingRow>
@@ -495,7 +573,7 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
             <small>{jevAllowedModels === null ? 'All current and future discovered models are eligible.' : `${jevAllowedModels.length} model(s) explicitly eligible.`}</small>
           </div>
         </SettingRow>
-        <div className="settings-save"><PrimaryButton disabled={jevSaving || !jevChanged || !jevModel.trim()} onClick={() => void saveJev()}>{jevSaving ? 'Saving…' : 'Save Jev settings'}</PrimaryButton></div>
+        <div className="settings-save"><PrimaryButton disabled={jevSaving || !jevChanged} onClick={() => void saveJev()}>{jevSaving ? 'Saving…' : 'Save Jev settings'}</PrimaryButton></div>
 
         <SettingRow title="Launch at login" description={snapshot.autostart.supported ? 'Start CodexRouter hidden when you sign in to macOS.' : 'Available in the packaged desktop app.'}>
           <Toggle checked={snapshot.autostart.enabled} disabled={!snapshot.autostart.supported} onChange={async checked => { try { await api!.setAutostart(checked); await onRefresh(); } catch (cause) { setError(messageOf(cause)); } }} />

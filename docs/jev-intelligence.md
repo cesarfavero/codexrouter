@@ -17,11 +17,8 @@ decode / normalize
     +--> Jev semantic advisor (optional)
     |      |- task tier: economy / balanced / deep
     |      |- reasoning effort
-    |      |- verification need
-    |      |- research dependence
-    |      |- decomposition gain
-    |      |- prior-failure signal
-    |      '- semantic risk
+    |      |- optional task-risk signals
+    |      '- optional account recommendation from eligible candidates
     |
     v
 confidence gate
@@ -38,6 +35,12 @@ official Codex upstream
 Only requests whose model is exactly `codexrouter/gateway` are eligible for Jev routing. Explicit native model requests and account-qualified model requests stay authoritative and bypass the semantic advisor.
 
 CodexRouter therefore manages `model = "codexrouter/gateway"` as the default model in the main Codex config while the integration is installed. The previous native model line is journaled and restored on uninstall. Upgrades from older CodexRouter journals are repaired automatically when Jev is enabled or the runtime starts. Explicit model choices made per request/session still bypass Jev.
+
+## Context budget
+
+Settings offers three context profiles. `Economy` is the default and sends only the latest user message (up to 3,000 characters) with the minimum routing, effort and manipulation questions. `Balanced` sends the latest user message (up to 6,000 characters) and adds failure/risk signals. `Full` keeps the complete available request text (still bounded by `CODEXROUTER_JEV_MAX_CHARS`) and all decision questions.
+
+The Router extracts known text fields, redacts common secrets, and never sends the complete Responses payload. For continuation requests, the profile only includes context present in the current request; it does not fetch prior response history from Codex.
 
 ## Modes
 
@@ -75,7 +78,9 @@ The packaged desktop app exposes the same controls under **Settings**:
 
 - Jev mode: off, observe, or active;
 - TypeSafe API key;
-- pinned Jev model;
+- internally pinned Jev model (shown for diagnostics, not user-editable);
+- context budget profile;
+- optional account routing mode and account allowlist;
 - minimum confidence gate;
 - hard per-model eligibility toggles for Jev routing.
 
@@ -94,6 +99,9 @@ On systems where secure OS encryption is unavailable, CodexRouter refuses to per
 | `CODEXROUTER_JEV_TIMEOUT_MS` | `3000` | Per-decision timeout. Jev failure remains fail-open. |
 | `CODEXROUTER_JEV_MIN_CONFIDENCE` | `0.78` | Minimum confidence before active model/effort application. |
 | `CODEXROUTER_JEV_MAX_CHARS` | `12000` | Maximum sanitized task characters transmitted. |
+| `CODEXROUTER_JEV_CONTEXT_PROFILE` | `economy` | `economy`, `balanced`, or `full`; controls context size and question count. |
+| `CODEXROUTER_JEV_ACCOUNT_ROUTING` | `off` | `off`, `observe`, or `active`; account selection requires Jev mode `active` to be applied. |
+| `CODEXROUTER_JEV_ALLOWED_ACCOUNTS` | unset | Optional comma-separated account IDs Jev may recommend. Unset means all configured accounts; empty means no Jev account recommendation can be applied. |
 | `CODEXROUTER_JEV_SAMPLE_RATE` | `1` | Fraction from 0 to 1 of eligible gateway requests sampled. |
 | `CODEXROUTER_JEV_CACHE_TTL_MS` | `300000` | In-memory decision-cache TTL. |
 | `CODEXROUTER_JEV_MAX_RPM` | `60` | Maximum Jev decisions per process per rolling minute. |
@@ -108,7 +116,8 @@ Enabling `observe` or `active` creates a new external data flow to TypeSafe. Bef
 - extracts only known text-bearing fields from the Codex request rather than forwarding the complete request;
 - caps the transmitted text;
 - redacts common bearer/JWT/API/GitHub/AWS credentials, generic secret fields, email addresses and local macOS user path names;
-- sends only non-secret routing metadata such as endpoint, tool count, continuation state, explicit reasoning effort and the local account's available model slugs;
+- sends only non-secret routing metadata such as endpoint, tool count, continuation state, explicit reasoning effort and allowlisted model slugs;
+- when account routing is enabled, sends anonymized candidate aliases with quota headroom and allowlisted models, never account labels, emails or local account IDs;
 - never sends the ChatGPT access token, refresh token, cookie, `auth.json`, account-id authentication header or Router registry;
 - never writes the transmitted task text to Router telemetry.
 
@@ -128,7 +137,7 @@ A user-configured model allowlist is applied after tier selection as a hard cons
 
 In the desktop UI, **Allow all** stores an unrestricted policy so newly discovered future models are eligible automatically. **Disable all** stores an empty allowlist, which disables Jev model overrides while leaving other Jev signals such as reasoning-effort advice available.
 
-This does not give Jev authority over which subscription can be used. Account selection and quota headroom remain deterministic.
+Account eligibility and quota headroom remain deterministic. In account-routing `observe` or `active`, the Router first filters out disabled accounts, accounts with unknown/unavailable usage, cooldown accounts, and accounts without a configured model. Jev only receives anonymized aliases for candidates that also pass the user-configured account allowlist. In `active`, a high-confidence recommendation may choose only one of those candidates. Invalid or unknown choices, suspected evaluator manipulation, timeout or API failure leave the deterministic headroom selection intact. Authentication, usage and 429 failover remain under Router control.
 
 ## Telemetry
 
@@ -144,6 +153,7 @@ Router request events can include a `jev` object with:
 - verification/research/decomposition/failure signals;
 - semantic risk score;
 - recommended model/effort;
+- recommended account alias/confidence and whether it was applied;
 - whether each recommendation was actually applied.
 
 The prompt/task text is deliberately absent. The desktop Activity message surfaces the Jev mode/status, recommended tier/model, whether the route was actually applied, and decision latency.

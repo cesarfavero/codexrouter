@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 const MODES = new Set(['off', 'observe', 'active']);
 const TIERS = new Set(['economy', 'balanced', 'deep']);
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
+const CONTEXT_PROFILE_NAMES = new Set(['economy', 'balanced', 'full']);
+const ACCOUNT_ROUTING_MODES = new Set(['off', 'observe', 'active']);
 const DEFAULT_BASE_URL = 'https://api.typesafe.ai';
 const DEFAULT_MODEL = 'jev-1.13.0';
 
@@ -58,9 +60,17 @@ const QUESTIONS = {
   },
 };
 
+const CONTEXT_PROFILES = {
+  economy: { maxChars: 3_000, questionIds: ['route_tier', 'reasoning_effort', 'evaluator_manipulation'] },
+  balanced: { maxChars: 6_000, questionIds: ['route_tier', 'reasoning_effort', 'failure_signal', 'evaluator_manipulation', 'semantic_risk'] },
+  full: { maxChars: Infinity, questionIds: Object.keys(QUESTIONS) },
+};
+
 export function jevConfigFromEnv(env = process.env) {
   const rawMode = String(env.CODEXROUTER_JEV_MODE || 'off').trim().toLowerCase();
   const mode = MODES.has(rawMode) ? rawMode : 'off';
+  const rawContextProfile = String(env.CODEXROUTER_JEV_CONTEXT_PROFILE || 'economy').trim().toLowerCase();
+  const rawAccountRouting = String(env.CODEXROUTER_JEV_ACCOUNT_ROUTING || 'off').trim().toLowerCase();
   const apiKey = String(env.TYPESAFE_API_KEY || '').trim();
   const baseURL = String(env.TYPESAFE_BASE_URL || DEFAULT_BASE_URL).trim().replace(/\/+$/, '');
   return {
@@ -72,6 +82,11 @@ export function jevConfigFromEnv(env = process.env) {
     timeoutMs: numeric(env.CODEXROUTER_JEV_TIMEOUT_MS, 3_000, 100, 10_000),
     minConfidence: numeric(env.CODEXROUTER_JEV_MIN_CONFIDENCE, 0.78, 0, 1),
     maxChars: Math.floor(numeric(env.CODEXROUTER_JEV_MAX_CHARS, 12_000, 1_000, 100_000)),
+    contextProfile: CONTEXT_PROFILE_NAMES.has(rawContextProfile) ? rawContextProfile : 'economy',
+    accountRouting: ACCOUNT_ROUTING_MODES.has(rawAccountRouting) ? rawAccountRouting : 'off',
+    allowedAccounts: Object.prototype.hasOwnProperty.call(env, 'CODEXROUTER_JEV_ALLOWED_ACCOUNTS')
+      ? parseModelList(env.CODEXROUTER_JEV_ALLOWED_ACCOUNTS)
+      : null,
     sampleRate: numeric(env.CODEXROUTER_JEV_SAMPLE_RATE, 1, 0, 1),
     cacheTtlMs: Math.floor(numeric(env.CODEXROUTER_JEV_CACHE_TTL_MS, 300_000, 0, 3_600_000)),
     maxRequestsPerMinute: Math.floor(numeric(env.CODEXROUTER_JEV_MAX_RPM, 60, 1, 1_200)),
@@ -85,6 +100,7 @@ export function createJevAdvisor({ config = jevConfigFromEnv(), fetchImpl = fetc
   const cache = new Map();
   const calls = [];
   const allowedModels = config.allowedModels == null ? null : parseModelList(config.allowedModels);
+  const allowedAccounts = config.allowedAccounts == null ? null : parseModelList(config.allowedAccounts);
 
   return {
     mode: config.mode,
@@ -94,12 +110,15 @@ export function createJevAdvisor({ config = jevConfigFromEnv(), fetchImpl = fetc
         configured: config.configured,
         model: config.model,
         timeoutMs: config.timeoutMs,
+        contextProfile: config.contextProfile,
+        accountRouting: config.accountRouting,
+        allowedAccounts: allowedAccounts === null ? null : [...allowedAccounts],
         sampleRate: config.sampleRate,
         maxRequestsPerMinute: config.maxRequestsPerMinute,
         allowedModels: allowedModels === null ? null : [...allowedModels],
       };
     },
-    async advise({ request, account, endpoint = 'responses' }) {
+    async advise({ request, account, endpoint = 'responses', accountCandidates = [] }) {
       if (config.mode === 'off') return null;
       if (!config.configured) return decisionStatus('unconfigured');
       if (config.sampleRate < 1 && random() > config.sampleRate) return decisionStatus('sampled-out');
@@ -109,13 +128,40 @@ export function createJevAdvisor({ config = jevConfigFromEnv(), fetchImpl = fetc
       while (calls.length && calls[0] < minuteAgo) calls.shift();
       if (calls.length >= config.maxRequestsPerMinute) return decisionStatus('budget-limited');
 
-      const state = buildJevState({ request, account, endpoint, maxChars: config.maxChars, allowedModels });
+      const profile = CONTEXT_PROFILES[config.contextProfile] ?? CONTEXT_PROFILES.economy;
+      const eligibleAccountCandidates = filterAccountCandidates(accountCandidates, allowedAccounts);
+      const candidateAliases = accountRoutingAliases(eligibleAccountCandidates, config.accountRouting, allowedModels);
+      const state = buildJevState({
+        request,
+        account,
+        endpoint,
+        maxChars: Math.min(config.maxChars, profile.maxChars),
+        contextProfile: config.contextProfile,
+        allowedModels,
+        accountCandidates: candidateAliases,
+      });
       if (!state.task) return decisionStatus('empty-state');
+      const questions = questionsFor({ profile, accountCandidates: candidateAliases, accountRouting: config.accountRouting });
 
-      const cacheKey = crypto.createHash('sha256').update(JSON.stringify({ model: config.model, state, questions: QUESTIONS })).digest('hex');
+      const cacheKey = crypto.createHash('sha256').update(JSON.stringify({
+        model: config.model,
+        mode: config.mode,
+        accountRouting: config.accountRouting,
+        minConfidence: config.minConfidence,
+        allowedModels,
+        allowedAccounts,
+        state,
+        questions,
+        candidateMapping: candidateAliases.map(candidate => ({
+          alias: candidate.id,
+          accountId: candidate.accountId,
+          headroomPercent: candidate.headroomPercent,
+          models: candidate.models,
+        })),
+      })).digest('hex');
       const cached = cache.get(cacheKey);
       if (cached && startedAt - cached.at <= config.cacheTtlMs) {
-        return { ...cached.value, cacheHit: true, latencyMs: 0 };
+        return { ...cached.value, cacheHit: true, inputTokens: 0, latencyMs: 0 };
       }
       if (cached) cache.delete(cacheKey);
 
@@ -130,14 +176,14 @@ export function createJevAdvisor({ config = jevConfigFromEnv(), fetchImpl = fetc
             accept: 'application/json',
             'content-type': 'application/json',
           },
-          body: JSON.stringify({ model: config.model, state, questions: QUESTIONS }),
+          body: JSON.stringify({ model: config.model, state, questions }),
           signal: controller.signal,
         });
         if (!response.ok) return decisionStatus('api-error', { latencyMs: now() - startedAt, httpStatus: response.status });
         const payload = await response.json();
-        const normalized = normalizeResponse(payload, now() - startedAt);
+        const normalized = normalizeResponse(payload, now() - startedAt, candidateAliases);
         if (normalized.status === 'ok' && config.cacheTtlMs > 0) {
-          cache.set(cacheKey, { at: startedAt, value: normalized });
+          cache.set(cacheKey, { at: now(), value: normalized });
           trimCache(cache, 256);
         }
         return normalized;
@@ -154,6 +200,13 @@ export function createJevAdvisor({ config = jevConfigFromEnv(), fetchImpl = fetc
         allowedModels,
       });
     },
+    resolveAccount(accountCandidates, decision) {
+      return resolveJevAccountRouting(filterAccountCandidates(accountCandidates, allowedAccounts), decision, {
+        mode: config.mode,
+        accountRouting: config.accountRouting,
+        minConfidence: config.minConfidence,
+      });
+    },
   };
 }
 
@@ -165,10 +218,11 @@ export function resolveJevRouting(account, request, decision, { mode = 'off', mi
   const eligibleModels = eligibleModelsForJev(account, allowedModels);
   const recommendedModel = selectModelForTier(account, tier, { allowedModels });
   const recommendedEffort = EFFORTS.has(decision.reasoningEffort) ? decision.reasoningEffort : null;
-  const modelConfidencePassed = Number(decision.routeConfidence) >= minConfidence;
-  const effortConfidencePassed = Number(decision.effortConfidence) >= minConfidence;
+  const modelConfidencePassed = (probability(decision.routeConfidence) ?? -1) >= minConfidence;
+  const effortConfidencePassed = (probability(decision.effortConfidence) ?? -1) >= minConfidence;
   const explicitEffort = typeof request?.reasoning?.effort === 'string' && request.reasoning.effort.length > 0;
-  const manipulationSuspected = Number(decision.evaluatorManipulation) >= 0.6;
+  const manipulationScore = probability(decision.evaluatorManipulation);
+  const manipulationSuspected = manipulationScore == null || manipulationScore >= 0.6;
   const active = mode === 'active' && !manipulationSuspected;
 
   return {
@@ -185,6 +239,32 @@ export function resolveJevRouting(account, request, decision, { mode = 'off', mi
     applyModel: Boolean(active && recommendedModel && modelConfidencePassed),
     applyEffort: Boolean(active && recommendedEffort && effortConfidencePassed && !explicitEffort),
   };
+}
+
+export function resolveJevAccountRouting(accountCandidates, decision, { mode = 'off', accountRouting = 'off', minConfidence = 0.78 } = {}) {
+  const candidates = Array.isArray(accountCandidates) ? accountCandidates.filter(item => item?.account?.id) : [];
+  const recommendedAccountId = typeof decision?.recommendedAccountId === 'string' ? decision.recommendedAccountId : null;
+  const candidate = candidates.find(item => item.account.id === recommendedAccountId) ?? null;
+  const confidencePassed = (probability(decision?.accountConfidence) ?? -1) >= minConfidence;
+  const manipulationScore = probability(decision?.evaluatorManipulation);
+  const manipulationSuspected = manipulationScore == null || manipulationScore >= 0.6;
+  const applicable = Boolean(candidate && accountRouting !== 'off');
+  return {
+    mode,
+    accountRouting,
+    applicable,
+    recommendedAccountId: candidate?.account.id ?? null,
+    accountConfidence: decision?.accountConfidence ?? null,
+    accountConfidencePassed: confidencePassed,
+    applyAccount: Boolean(mode === 'active' && accountRouting === 'active' && candidate && confidencePassed && !manipulationSuspected),
+  };
+}
+
+function filterAccountCandidates(accountCandidates, allowedAccounts) {
+  const candidates = Array.isArray(accountCandidates) ? accountCandidates : [];
+  if (allowedAccounts === null) return candidates;
+  const allowed = new Set(allowedAccounts);
+  return candidates.filter(item => allowed.has(item?.account?.id));
 }
 
 export function eligibleModelsForJev(account, allowedModels = null) {
@@ -227,7 +307,7 @@ export function sanitizeJevText(value) {
     .replace(/\/Users\/[^/\s]+\//g, '/Users/[USER]/');
 }
 
-export function summarizeJevDecision(decision, routing = null) {
+export function summarizeJevDecision(decision, routing = null, accountRouting = null) {
   if (!decision) return null;
   return {
     mode: routing?.mode ?? null,
@@ -251,13 +331,19 @@ export function summarizeJevDecision(decision, routing = null) {
     recommendedEffort: routing?.recommendedEffort ?? null,
     appliedModel: routing?.applyModel === true,
     appliedEffort: routing?.applyEffort === true,
+    accountRouting: accountRouting?.accountRouting ?? null,
+    recommendedAccountId: accountRouting?.recommendedAccountId ?? null,
+    accountConfidence: accountRouting?.accountConfidence ?? null,
+    appliedAccount: accountRouting?.applyAccount === true,
     modelPolicyRestricted: routing?.modelPolicyRestricted === true,
     eligibleModels: Array.isArray(routing?.eligibleModels) ? routing.eligibleModels : null,
   };
 }
 
-function buildJevState({ request, account, endpoint, maxChars, allowedModels = null }) {
-  const rawText = [extractText(request?.instructions), extractText(request?.input)].filter(Boolean).join('\n\n');
+function buildJevState({ request, account, endpoint, maxChars, contextProfile = 'economy', allowedModels = null, accountCandidates = [] }) {
+  const rawText = contextProfile === 'full'
+    ? [extractText(request?.instructions), extractText(request?.input)].filter(Boolean).join('\n\n')
+    : extractLatestUserText(request?.input);
   const sanitized = sanitizeJevText(rawText).trim();
   const eligibleModels = eligibleModelsForJev(account, allowedModels);
   return {
@@ -273,8 +359,35 @@ function buildJevState({ request, account, endpoint, maxChars, allowedModels = n
       preferred_model: account?.preferredModel ?? null,
       available_models: eligibleModels.slice(0, 32),
       model_policy_restricted: allowedModels !== null,
+      account_candidates: accountCandidates.map(candidate => ({
+        id: candidate.id,
+        headroom_percent: candidate.headroomPercent,
+        models: candidate.models,
+      })),
     },
   };
+}
+
+function questionsFor({ profile, accountCandidates, accountRouting }) {
+  const questions = Object.fromEntries(profile.questionIds.map(id => [id, QUESTIONS[id]]));
+  if (accountRouting !== 'off' && accountCandidates.length > 1) {
+    questions.account_choice = {
+      type: 'choice',
+      instructions: 'Choose the eligible account in `router.account_candidates` that best balances the task complexity in `task` with its reported capacity and models. Prefer preserving scarce high-capability capacity for work that needs it.',
+      criteria: Object.fromEntries(accountCandidates.map(candidate => [candidate.id, `Eligible candidate ${candidate.id}.`])),
+    };
+  }
+  return questions;
+}
+
+function accountRoutingAliases(accountCandidates, accountRouting, allowedModels) {
+  if (accountRouting === 'off') return [];
+  return (Array.isArray(accountCandidates) ? accountCandidates : []).slice(0, 16).map((candidate, index) => ({
+    id: `candidate_${index + 1}`,
+    accountId: candidate?.account?.id ?? null,
+    headroomPercent: Math.round(Number.isFinite(candidate?.score) ? candidate.score : 50),
+    models: eligibleModelsForJev(candidate?.account, allowedModels).slice(0, 8),
+  })).filter(candidate => candidate.accountId);
 }
 
 function extractText(value, depth = 0) {
@@ -286,6 +399,18 @@ function extractText(value, depth = 0) {
   return fields.map(field => extractText(value[field], depth + 1)).filter(Boolean).join('\n');
 }
 
+function extractLatestUserText(value) {
+  if (!Array.isArray(value)) return extractText(value);
+  for (let index = value.length - 1; index >= 0; index -= 1) {
+    const item = value[index];
+    if (item?.role === 'user') {
+      const text = extractText(item?.content);
+      if (text) return text;
+    }
+  }
+  return extractText(value.at(-1));
+}
+
 function truncateText(value, maxChars) {
   if (value.length <= maxChars) return value;
   const head = Math.floor(maxChars * 0.62);
@@ -293,7 +418,7 @@ function truncateText(value, maxChars) {
   return `${value.slice(0, head)}\n[...TRUNCATED BY CODEXROUTER...]\n${value.slice(-tail)}`;
 }
 
-function normalizeResponse(payload, latencyMs) {
+function normalizeResponse(payload, latencyMs, accountCandidates = []) {
   const answers = payload?.answers;
   if (!answers || typeof answers !== 'object') return decisionStatus('invalid-response', { latencyMs });
   const route = answers.route_tier;
@@ -303,6 +428,10 @@ function normalizeResponse(payload, latencyMs) {
   const routeConfidence = probability(route.confidence);
   const effortConfidence = probability(effort.confidence);
   if (routeConfidence == null || effortConfidence == null) return decisionStatus('invalid-response', { latencyMs });
+  const accountChoice = answers.account_choice;
+  const chosenAccount = accountChoice?.type === 'choice'
+    ? accountCandidates.find(candidate => candidate.id === accountChoice.choice) ?? null
+    : null;
   return {
     status: 'ok',
     model: typeof payload.model === 'string' ? payload.model : null,
@@ -313,6 +442,8 @@ function normalizeResponse(payload, latencyMs) {
     routeConfidence,
     reasoningEffort: effort.choice,
     effortConfidence,
+    recommendedAccountId: chosenAccount?.accountId ?? null,
+    accountConfidence: chosenAccount ? probability(accountChoice.confidence) : null,
     needsVerification: noul(answers.needs_verification),
     researchNeed: noul(answers.research_need),
     decompositionGain: noul(answers.decomposition_gain),
@@ -331,6 +462,7 @@ function score(answer) {
 }
 
 function probability(value) {
+  if (value === null || value === undefined || value === '') return null;
   const number = finite(value);
   return number != null && number >= 0 && number <= 1 ? number : null;
 }

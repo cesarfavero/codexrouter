@@ -15,6 +15,8 @@ const UPDATE_CHECK_URL = 'https://api.github.com/repos/cesarfavero/codexrouter/r
 const LOG_PATH = path.join(os.homedir(), '.codexrouter', 'logs', 'router.jsonl');
 const JEV_SETTINGS_PATH = path.join(os.homedir(), '.codexrouter', 'jev-settings.json');
 const JEV_MODES = new Set(['off', 'observe', 'active']);
+const JEV_CONTEXT_PROFILES = new Set(['economy', 'balanced', 'full']);
+const JEV_ACCOUNT_ROUTING_MODES = new Set(['off', 'observe', 'active']);
 
 let mainWindow = null;
 let tray = null;
@@ -66,6 +68,11 @@ function loadJevSettings() {
   }
 }
 
+function boundedNumber(value, fallback, min, max) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
+}
+
 function saveJevSettings(settings) {
   fs.mkdirSync(path.dirname(JEV_SETTINGS_PATH), { recursive: true, mode: 0o700 });
   const temporary = `${JEV_SETTINGS_PATH}.${process.pid}.tmp`;
@@ -90,6 +97,19 @@ function desktopJevConfig(jev) {
     ? Math.max(0, Math.min(1, Number(settings.minConfidence)))
     : base.minConfidence;
   const model = typeof settings.model === 'string' && settings.model.trim() ? settings.model.trim() : base.model;
+  const contextProfile = JEV_CONTEXT_PROFILES.has(settings.contextProfile) ? settings.contextProfile : base.contextProfile;
+  const accountRouting = JEV_ACCOUNT_ROUTING_MODES.has(settings.accountRouting) ? settings.accountRouting : base.accountRouting;
+  const maxChars = boundedNumber(settings.maxChars, base.maxChars, 1_000, 100_000);
+  const sampleRate = boundedNumber(settings.sampleRate, base.sampleRate, 0, 1);
+  const cacheTtlMs = boundedNumber(settings.cacheTtlMs, base.cacheTtlMs, 0, 3_600_000);
+  const hasStoredAccountPolicy = Object.prototype.hasOwnProperty.call(settings, 'allowedAccounts');
+  const allowedAccounts = hasStoredAccountPolicy
+    ? settings.allowedAccounts === null
+      ? null
+      : Array.isArray(settings.allowedAccounts)
+        ? [...new Set(settings.allowedAccounts.map(value => String(value || '').trim()).filter(Boolean))]
+        : base.allowedAccounts
+    : base.allowedAccounts;
   const hasStoredModelPolicy = Object.prototype.hasOwnProperty.call(settings, 'allowedModels');
   const allowedModels = hasStoredModelPolicy
     ? settings.allowedModels === null
@@ -99,7 +119,7 @@ function desktopJevConfig(jev) {
         : base.allowedModels
     : base.allowedModels;
   const apiKey = storedKey || base.apiKey;
-  return { ...base, mode, model, minConfidence, allowedModels, apiKey, configured: Boolean(apiKey) };
+  return { ...base, mode, model, minConfidence, contextProfile, accountRouting, maxChars, sampleRate, cacheTtlMs, allowedAccounts, allowedModels, apiKey, configured: Boolean(apiKey) };
 }
 
 function desktopJevSummary(jev) {
@@ -111,6 +131,12 @@ function desktopJevSummary(jev) {
     configured: config.configured,
     model: config.model,
     minConfidence: config.minConfidence,
+    contextProfile: config.contextProfile,
+    accountRouting: config.accountRouting,
+    maxChars: config.maxChars,
+    sampleRate: config.sampleRate,
+    cacheTtlMs: config.cacheTtlMs,
+    allowedAccounts: config.allowedAccounts === null ? null : [...config.allowedAccounts],
     allowedModels: config.allowedModels === null ? null : [...config.allowedModels],
     keySource: stored ? 'secure-storage' : config.configured ? 'environment' : 'none',
     secureStorageAvailable: safeStorage.isEncryptionAvailable(),
@@ -124,16 +150,46 @@ function createDesktopJevAdvisor(jev) {
 async function applyJevSettings(raw) {
   const { jev, integration } = await core();
   const current = loadJevSettings();
+  const baseConfig = jev.jevConfigFromEnv(process.env);
   const mode = String(raw?.mode || 'off').trim().toLowerCase();
   if (!JEV_MODES.has(mode)) throw new Error('Jev mode must be off, observe, or active.');
 
-  const model = String(raw?.model || 'jev-1.13.0').trim();
+  const model = typeof raw?.model === 'string' && raw.model.trim()
+    ? raw.model.trim()
+    : typeof current.model === 'string' && current.model.trim()
+      ? current.model.trim()
+      : 'jev-1.13.0';
   if (!model || model.length > 120 || !/^[A-Za-z0-9._/-]+$/.test(model)) throw new Error('Jev model id is invalid.');
 
   const minConfidence = Number(raw?.minConfidence);
   if (!Number.isFinite(minConfidence) || minConfidence < 0 || minConfidence > 1) throw new Error('Jev minimum confidence must be between 0 and 1.');
+  const contextProfile = String(raw?.contextProfile || current.contextProfile || 'economy').trim().toLowerCase();
+  if (!JEV_CONTEXT_PROFILES.has(contextProfile)) throw new Error('Jev context profile must be economy, balanced, or full.');
+  const accountRouting = String(raw?.accountRouting || current.accountRouting || 'off').trim().toLowerCase();
+  if (!JEV_ACCOUNT_ROUTING_MODES.has(accountRouting)) throw new Error('Jev account routing must be off, observe, or active.');
+  const maxChars = Number(raw?.maxChars ?? current.maxChars ?? 12_000);
+  if (!Number.isInteger(maxChars) || maxChars < 1_000 || maxChars > 100_000) throw new Error('Jev maximum context must be between 1,000 and 100,000 characters.');
+  const sampleRate = Number(raw?.sampleRate ?? current.sampleRate ?? 1);
+  if (!Number.isFinite(sampleRate) || sampleRate < 0 || sampleRate > 1) throw new Error('Jev sample rate must be between 0 and 1.');
+  const cacheTtlMs = Number(raw?.cacheTtlMs ?? current.cacheTtlMs ?? 300_000);
+  if (!Number.isInteger(cacheTtlMs) || cacheTtlMs < 0 || cacheTtlMs > 3_600_000) throw new Error('Jev cache duration must be between 0 and 3,600,000 milliseconds.');
+  let allowedAccounts = Object.prototype.hasOwnProperty.call(current, 'allowedAccounts')
+    ? current.allowedAccounts
+    : baseConfig.allowedAccounts;
+  if (Object.prototype.hasOwnProperty.call(raw || {}, 'allowedAccounts')) {
+    if (raw.allowedAccounts === null) {
+      allowedAccounts = null;
+    } else {
+      if (!Array.isArray(raw.allowedAccounts)) throw new Error('Jev allowed accounts must be an array or null.');
+      if (raw.allowedAccounts.length > 128) throw new Error('Jev allowed account list is too large.');
+      allowedAccounts = [...new Set(raw.allowedAccounts.map(value => String(value || '').trim()).filter(Boolean))];
+      if (allowedAccounts.some(value => value.length > 180 || !/^[A-Za-z0-9._-]+$/.test(value))) {
+        throw new Error('Jev allowed account list contains an invalid account id.');
+      }
+    }
+  }
 
-  const next = { ...current, mode, model, minConfidence };
+  const next = { ...current, mode, model, minConfidence, contextProfile, accountRouting, maxChars, sampleRate, cacheTtlMs, allowedAccounts };
   if (Object.prototype.hasOwnProperty.call(raw || {}, 'allowedModels')) {
     if (raw.allowedModels === null) {
       next.allowedModels = null;
@@ -175,7 +231,7 @@ async function applyJevSettings(raw) {
     : gatewayRepair?.changed
       ? ' · Codex default repaired to Router gateway'
       : ' · Router gateway default confirmed';
-  record('info', `Jev semantic routing saved: ${summary.mode} · ${summary.configured ? 'configured' : 'no API key'} · ${summary.model} · ${modelPolicy}${gatewayNote}.`);
+  record('info', `Jev semantic routing saved: ${summary.mode} · ${summary.contextProfile} context · sample ${Math.round(summary.sampleRate * 100)}% · account routing ${summary.accountRouting} · ${summary.allowedAccounts === null ? 'all accounts eligible' : `${summary.allowedAccounts.length} account(s) eligible`} · ${summary.configured ? 'configured' : 'no API key'} · ${summary.model} · ${modelPolicy}${gatewayNote}.`);
   sendEvent({ type: 'snapshot-invalidated' });
   return snapshot();
 }
@@ -210,7 +266,7 @@ async function recordRouterRequest(event) {
   const suffix = event.error || failures;
   const jev = event.jev;
   const jevSuffix = jev
-    ? ` · Jev ${jev.mode || 'shadow'}:${jev.status}${jev.routeTier ? ` ${jev.routeTier}→${jev.recommendedModel || 'default'}${jev.appliedModel ? ' applied' : ' shadow'}` : ''}${Number.isFinite(jev.latencyMs) ? ` ${jev.latencyMs}ms` : ''}`
+    ? ` · Jev ${jev.mode || 'shadow'}:${jev.status}${jev.routeTier ? ` ${jev.routeTier}→${jev.recommendedModel || 'default'}${jev.appliedModel ? ' applied' : ' shadow'}` : ''}${jev.recommendedAccountId ? ` · account ${jev.appliedAccount ? 'applied' : 'shadow'}` : ''}${Number.isFinite(jev.latencyMs) ? ` ${jev.latencyMs}ms` : ''}`
     : '';
   const message = `Request ${event.requestId || 'unknown'} via Router → ${account} · ${target} · ${event.status} · ${event.durationMs ?? 0}ms${jevSuffix}${suffix ? ` · ${suffix}` : ''}`;
   const details = { ...event, account: event.account ? { id: event.account.id, label: event.account.label } : null };

@@ -36,6 +36,7 @@ export function startRouter({
     let routedModel = null;
     let jevDecision = null;
     let jevRouting = null;
+    let jevAccountRouting = null;
     const attempts = [];
     try {
       if (req.method === 'GET' && req.url === '/health') {
@@ -109,11 +110,21 @@ export function startRouter({
             if (!usageIsHealthy(usage)) throw cooldownError(account, usage);
             parsed.model = qualified.modelSlug;
           } else {
-            account = await selectGatewayAccount(account, usageReader);
+            const candidates = await listHealthyGatewayAccounts(account, usageReader);
+            account = chooseGatewayAccount(candidates, account);
+            if (account.id !== defaultAccount().id) setDefaultAccount(account.id);
             if (!account.preferredModel) throw httpError(503, `The active account “${account.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);
+            if (isGatewaySlug(requestedModel) && jevAdvisor?.mode !== 'off') {
+              jevDecision = await adviseJevSafely(jevAdvisor, { request: parsed, account, endpoint, accountCandidates: candidates });
+              jevAccountRouting = jevAdvisor?.resolveAccount?.(candidates, jevDecision) ?? null;
+              if (jevAccountRouting?.applyAccount) {
+                const recommended = candidates.find(candidate => candidate.account.id === jevAccountRouting.recommendedAccountId);
+                if (recommended?.account?.preferredModel) account = recommended.account;
+              }
+              if (account.id !== defaultAccount().id) setDefaultAccount(account.id);
+            }
             let selectedModel = isGatewaySlug(requestedModel) ? account.preferredModel : requestedModel;
             if (isGatewaySlug(requestedModel) && jevAdvisor?.mode !== 'off') {
-              jevDecision = await adviseJevSafely(jevAdvisor, { request: parsed, account, endpoint });
               jevRouting = jevAdvisor?.resolve?.(account, parsed, jevDecision) ?? null;
               if (jevRouting?.applyModel && jevRouting.recommendedModel) selectedModel = jevRouting.recommendedModel;
               if (jevRouting?.applyEffort && jevRouting.recommendedEffort) {
@@ -160,12 +171,12 @@ export function startRouter({
       routedAccount = account;
       routedModel = requestModel;
       const usage = await writeResponse(res, upstream);
-      const jev = summarizeJevDecision(jevDecision, jevRouting);
+      const jev = summarizeJevDecision(jevDecision, jevRouting, jevAccountRouting);
       await emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http', durationMs: Date.now() - startedAt, attempts, usage: null, jev });
       if (usage) void emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http-usage', durationMs: Date.now() - startedAt, attempts, usage, usageOnly: true, jev });
     } catch (error) {
       const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
-      await emitRequest(onRequest, { requestId, account: routedAccount, endpoint: req.url?.split('?')[0] || null, model: routedModel, status, transport: 'http', durationMs: Date.now() - startedAt, attempts, error: sanitizeLogText(error?.message || String(error)), jev: summarizeJevDecision(jevDecision, jevRouting) });
+      await emitRequest(onRequest, { requestId, account: routedAccount, endpoint: req.url?.split('?')[0] || null, model: routedModel, status, transport: 'http', durationMs: Date.now() - startedAt, attempts, error: sanitizeLogText(error?.message || String(error)), jev: summarizeJevDecision(jevDecision, jevRouting, jevAccountRouting) });
       res.writeHead(status, { 'content-type': 'application/json' });
       res.end(JSON.stringify({
         error: {
@@ -267,9 +278,17 @@ async function readUsageSafely(usageReader, account, options = {}) {
 }
 
 async function selectGatewayAccount(active, usageReader, { force = false, exclude = new Set() } = {}) {
+  const healthy = await listHealthyGatewayAccounts(active, usageReader, { force, exclude });
+  const selected = chooseGatewayAccount(healthy, active);
+  if (selected.id !== active.id) setDefaultAccount(selected.id);
+  return selected;
+}
+
+async function listHealthyGatewayAccounts(active, usageReader, { force = false, exclude = new Set() } = {}) {
   const accounts = allAccounts();
   const candidates = [active, ...accounts.filter(account => account.id !== active.id)]
     .filter(account => account?.enabled !== false)
+    .filter(account => typeof account?.preferredModel === 'string' && account.preferredModel.length > 0)
     .filter((account, index, list) => !exclude.has(account.id) && list.findIndex(item => item.id === account.id) === index);
   const healthy = [];
   let refreshAll = force;
@@ -293,23 +312,24 @@ async function selectGatewayAccount(active, usageReader, { force = false, exclud
     }
   }
   if (healthy.length) {
-    healthy.sort((left, right) => {
-      const scoreDelta = right.score - left.score;
-      if (Math.abs(scoreDelta) > HEADROOM_TIE_MARGIN) return scoreDelta;
-      if (!left.hasHeadroom && !right.hasHeadroom) {
-        return left.account.id === active.id ? -1 : right.account.id === active.id ? 1 : 0;
-      }
-      // When accounts have comparable headroom, rotate away from the current
-      // default so equal-capacity subscriptions share the workload.
-      if (left.account.id === active.id) return 1;
-      if (right.account.id === active.id) return -1;
-      return left.account.id.localeCompare(right.account.id);
-    });
-    const selected = healthy[0].account;
-    if (selected.id !== active.id) setDefaultAccount(selected.id);
-    return selected;
+    return healthy;
   }
   throw cooldownError(active, await readUsageSafely(usageReader, active, { force }));
+}
+
+function chooseGatewayAccount(healthy, active) {
+  return [...healthy].sort((left, right) => {
+    const scoreDelta = right.score - left.score;
+    if (Math.abs(scoreDelta) > HEADROOM_TIE_MARGIN) return scoreDelta;
+    if (!left.hasHeadroom && !right.hasHeadroom) {
+      return left.account.id === active.id ? -1 : right.account.id === active.id ? 1 : 0;
+    }
+    // When accounts have comparable headroom, rotate away from the current
+    // default so equal-capacity subscriptions share the workload.
+    if (left.account.id === active.id) return 1;
+    if (right.account.id === active.id) return -1;
+    return left.account.id.localeCompare(right.account.id);
+  })[0].account;
 }
 
 function accountHeadroomScore(usage) {
