@@ -2,7 +2,7 @@
 
 ## Product intent
 
-CodexRouter presents one managed `CodexRouter` model in the native Codex picker. The desktop app owns account selection, native-model selection, local usage telemetry and gateway lifecycle. Each ChatGPT account remains isolated behind its own official Codex login profile.
+CodexRouter presents one managed `Router` model in the native Codex picker. The desktop app owns account selection, native-model selection, local usage telemetry and gateway lifecycle. Each ChatGPT account remains isolated behind its own official Codex login profile.
 
 ## Routing rules
 
@@ -10,6 +10,7 @@ CodexRouter presents one managed `CodexRouter` model in the native Codex picker.
 - `defaultAccountId` remains the persisted active-account field for backwards compatibility; the gateway may update it when automatic account failover selects another account.
 - The gateway may automatically select another healthy account when the active account is exhausted or near its usage limit.
 - Do not aggregate multiple subscriptions into a single effective quota pool.
+- Discover selectable native models from each account's current Codex CLI catalog; do not maintain version-specific model lists. Preserve valid user-selected models, and base automatic selection only on models reported by that account.
 
 ## Non-goals
 

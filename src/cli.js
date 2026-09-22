@@ -107,7 +107,7 @@ function installCommand(args) {
   console.log(`Catalog: ${result.path}`);
   console.log(`Codex config updated: ${journal.configPath}`);
   console.log(`Start the router with: codexrouter start --port ${port}`);
-  console.log('Restart Codex and select CodexRouter.');
+  console.log('Restart Codex and select Router.');
 }
 
 function uninstallCommand() {

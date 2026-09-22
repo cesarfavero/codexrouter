@@ -8,7 +8,6 @@ export const ROUTER_PREFIX = 'codexrouter/';
 export const GATEWAY_SLUG = 'codexrouter/gateway';
 export const GATEWAY_DISPLAY_NAME = 'Router';
 export const ROUTER_MODEL_PREFIX = 'Router · ';
-const DEFAULT_MODEL_ORDER = ['gpt-5.5', 'gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'];
 
 export function isGatewaySlug(value) {
   return value === GATEWAY_SLUG;
@@ -53,7 +52,7 @@ export function chooseNativeModel(catalog, preferredModel = null) {
   const models = listVisibleNativeModels(catalog);
   if (!models.length) return null;
   if (preferredModel && models.some(model => model.slug === preferredModel)) return preferredModel;
-  return DEFAULT_MODEL_ORDER.find(slug => models.some(model => model.slug === slug))
+  return models.find(model => /(?:^|[-_/])(luna|mini|nano|fast)(?:$|[-_/])/i.test(model.slug))?.slug
     ?? models.find(model => model.is_default !== true)?.slug
     ?? models[0].slug;
 }
