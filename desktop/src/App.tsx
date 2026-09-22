@@ -6,7 +6,7 @@ import { Icon, type IconName } from './icons';
 import type { AccountSummary, AccountUsage, LauncherEvent, LogRecord, Operation, Snapshot } from './types';
 
 const api = window.codexRouter;
-type Surface = 'overview' | 'accounts' | 'setup' | 'activity' | 'settings' | 'account-detail';
+type Surface = 'overview' | 'accounts' | 'setup' | 'activity' | 'settings' | 'jev' | 'account-detail';
 const transition = { duration: 0.26, ease: [0.16, 1, 0.3, 1] } as const;
 
 export function App() {
@@ -73,6 +73,7 @@ export function App() {
           <NavGroup label="Configuration">
             <NavItem active={surface === 'setup'} icon="setup" label="Setup" onClick={() => setSurface('setup')} dot={needsSetup ? 'attention' : snapshot.integration.installed ? 'success' : undefined} />
             <NavItem active={surface === 'settings'} icon="settings" label="Settings" onClick={() => setSurface('settings')} />
+            <NavItem active={surface === 'jev'} icon="brain" label="Jev" onClick={() => setSurface('jev')} dot={snapshot.jev.mode === 'active' ? 'success' : undefined} />
           </NavGroup>
           <NavGroup label="Runtime">
             <NavItem active={surface === 'activity'} icon="activity" label="Activity" onClick={() => setSurface('activity')} dot={snapshot.runtime.running ? 'success' : undefined} />
@@ -112,6 +113,7 @@ export function App() {
               {surface === 'activity' ? <ActivitySurface logs={logs} snapshot={snapshot} /> : null}
               {surface === 'account-detail' ? <AccountDetailSurface account={snapshot.accounts.find(item => item.id === selectedAccountId) ?? activeAccount} logs={logs} onBack={() => setSurface('overview')} /> : null}
               {surface === 'settings' ? <SettingsSurface snapshot={snapshot} onRefresh={refresh} setError={setError} /> : null}
+              {surface === 'jev' ? <JevSurface snapshot={snapshot} onRefresh={refresh} setError={setError} /> : null}
             </motion.section>
           </AnimatePresence>
         </div>
@@ -363,6 +365,51 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
   const [model, setModel] = useState(active?.preferredModel ?? '');
   const [effort, setEffort] = useState(active?.preferredEffort ?? 'medium');
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setModel(active?.preferredModel ?? '');
+    setEffort(active?.preferredEffort ?? 'medium');
+  }, [active?.id, active?.preferredModel, active?.preferredEffort]);
+
+  const savePreferences = async () => {
+    if (!active || saving) return;
+    setSaving(true);
+    try { await api!.setAccountPreferences(active.id, { preferredModel: model || null, preferredEffort: effort || null }); await onRefresh(); }
+    catch (cause) { setError(messageOf(cause)); }
+    finally { setSaving(false); }
+  };
+
+  return <>
+    <SurfaceHeader eyebrow="Settings" icon="settings" title="Codex defaults" body="Choose the native model and reasoning effort the Router uses for your active account." />
+    <div className="settings-list settings-compact">
+      <SettingRow title="Default native model" description={active ? 'Model used behind CodexRouter for the active account. Refresh the gateway catalog to discover new models.' : 'Connect an account first.'}>
+        <select aria-label="Default native model" disabled={!active || !availableModels.length || saving} onChange={event => setModel(event.target.value)} value={model}>
+          {!availableModels.length ? <option value="">Refresh catalog first</option> : null}
+          {availableModels.map(item => <option key={item.slug} value={item.slug}>{item.name} · {item.slug}</option>)}
+        </select>
+      </SettingRow>
+      <SettingRow title="Default reasoning effort" description="Applied only when a request does not already specify reasoning.effort.">
+        <select aria-label="Default reasoning effort" disabled={!active || saving} onChange={event => setEffort(event.target.value)} value={effort}>
+          {['minimal', 'low', 'medium', 'high', 'xhigh'].map(value => <option key={value} value={value}>{value}</option>)}
+        </select>
+      </SettingRow>
+      <div className="settings-save"><PrimaryButton disabled={!active || saving || (model === (active?.preferredModel ?? '') && effort === (active?.preferredEffort ?? 'medium'))} onClick={() => void savePreferences()}>{saving ? 'Saving…' : 'Save model defaults'}</PrimaryButton></div>
+      <div className="settings-section-label">Desktop</div>
+      <SettingRow title="Launch at login" description={snapshot.autostart.supported ? 'Start CodexRouter hidden when you sign in to macOS.' : 'Available in the packaged desktop app.'}>
+        <Toggle checked={snapshot.autostart.enabled} disabled={!snapshot.autostart.supported} onChange={async checked => { try { await api!.setAutostart(checked); await onRefresh(); } catch (cause) { setError(messageOf(cause)); } }} />
+      </SettingRow>
+      <SettingRow title="Model shown in Codex" description="All account and model routing happens behind this one managed row."><code>{snapshot.gateway.displayName}</code></SettingRow>
+      <SettingRow title="Router endpoint" description="Loopback only. It is not exposed to the network."><code>127.0.0.1:{snapshot.runtime.port}</code></SettingRow>
+      <SettingRow title="Codex" description={snapshot.codex.available ? 'Detected on this Mac.' : 'Install the Codex CLI before adding accounts.'}><span className="value-text">{snapshot.codex.version || 'Not found'}</span></SettingRow>
+      <SettingRow title="Local data" description="Account metadata, isolated CODEX_HOME profiles and the generated gateway catalog."><SecondaryButton icon="folder" onClick={() => void run(() => api!.revealData(), setError)}>Reveal</SecondaryButton></SettingRow>
+    </div>
+    <div className="credits-panel"><Icon name="shield" /><div><strong>Open-source attribution</strong><p>The desktop UI/UX and launcher patterns are adapted from <code>miuuyy/codex-chatgpt-web</code> under the MIT License. The original notice remains in <code>LICENSES/</code>.</p></div><SecondaryButton icon="external" onClick={() => void api!.openExternal('https://github.com/miuuyy/codex-chatgpt-web')}>Upstream</SecondaryButton></div>
+  </>;
+}
+
+function JevSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot; onRefresh: () => Promise<void>; setError: (message: string | null) => void }) {
+  const active = snapshot.accounts.find(account => account.isActive) ?? null;
+  const availableModels = active?.availableModels ?? [];
   const [jevMode, setJevMode] = useState<'off' | 'observe' | 'active'>(snapshot.jev.mode);
   const [jevConfidence, setJevConfidence] = useState(snapshot.jev.minConfidence);
   const [jevContextProfile, setJevContextProfile] = useState<'economy' | 'balanced' | 'full'>(snapshot.jev.contextProfile);
@@ -376,11 +423,6 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
   const [jevSaving, setJevSaving] = useState(false);
 
   useEffect(() => {
-    setModel(active?.preferredModel ?? '');
-    setEffort(active?.preferredEffort ?? 'medium');
-  }, [active?.id, active?.preferredModel, active?.preferredEffort]);
-
-  useEffect(() => {
     setJevMode(snapshot.jev.mode);
     setJevConfidence(snapshot.jev.minConfidence);
     setJevContextProfile(snapshot.jev.contextProfile);
@@ -392,14 +434,6 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
     setJevAllowedModels(snapshot.jev.allowedModels);
     setJevKey('');
   }, [snapshot.jev.mode, snapshot.jev.model, snapshot.jev.minConfidence, snapshot.jev.contextProfile, snapshot.jev.accountRouting, snapshot.jev.allowedAccounts, snapshot.jev.allowedModels, snapshot.jev.maxChars, snapshot.jev.sampleRate, snapshot.jev.cacheTtlMs, snapshot.jev.keySource]);
-
-  const savePreferences = async () => {
-    if (!active || saving) return;
-    setSaving(true);
-    try { await api!.setAccountPreferences(active.id, { preferredModel: model || null, preferredEffort: effort || null }); await onRefresh(); }
-    catch (cause) { setError(messageOf(cause)); }
-    finally { setSaving(false); }
-  };
 
   const saveJev = async (options: { clearApiKey?: boolean } = {}) => {
     if (jevSaving) return;
@@ -466,21 +500,8 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
 
   return (
     <>
-      <SurfaceHeader eyebrow="Settings" icon="settings" title="Models, intelligence and desktop behavior" body="Control native Codex defaults and the optional Jev semantic routing layer." />
+      <SurfaceHeader eyebrow="Jev" icon="brain" title="Jev routing policy" body="Configure the optional semantic advisor. Deterministic Router checks remain authoritative for account eligibility, quotas, cooldowns, and permissions." />
       <div className="settings-list">
-        <SettingRow title="Default native model" description={active ? 'Model used behind CodexRouter for the active account. Refresh the gateway catalog to discover new models.' : 'Connect an account first.'}>
-          <select aria-label="Default native model" disabled={!active || !availableModels.length || saving} onChange={event => setModel(event.target.value)} value={model}>
-            {!availableModels.length ? <option value="">Refresh catalog first</option> : null}
-            {availableModels.map(item => <option key={item.slug} value={item.slug}>{item.name} · {item.slug}</option>)}
-          </select>
-        </SettingRow>
-        <SettingRow title="Default reasoning effort" description="Applied only when a request does not already specify reasoning.effort.">
-          <select aria-label="Default reasoning effort" disabled={!active || saving} onChange={event => setEffort(event.target.value)} value={effort}>
-            {['minimal', 'low', 'medium', 'high', 'xhigh'].map(value => <option key={value} value={value}>{value}</option>)}
-          </select>
-        </SettingRow>
-        <div className="settings-save"><PrimaryButton disabled={!active || saving || (model === (active?.preferredModel ?? '') && effort === (active?.preferredEffort ?? 'medium'))} onClick={() => void savePreferences()}> {saving ? 'Saving…' : 'Save model defaults'}</PrimaryButton></div>
-
         <SettingRow title="Jev semantic routing" description="Off makes no external call. Observe records a shadow recommendation. Active may apply high-confidence model and effort recommendations only to the managed Router model.">
           <select aria-label="Jev semantic routing mode" disabled={jevSaving} onChange={event => setJevMode(event.target.value as 'off' | 'observe' | 'active')} value={jevMode}>
             <option value="off">Off</option>
@@ -575,15 +596,7 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
         </SettingRow>
         <div className="settings-save"><PrimaryButton disabled={jevSaving || !jevChanged} onClick={() => void saveJev()}>{jevSaving ? 'Saving…' : 'Save Jev settings'}</PrimaryButton></div>
 
-        <SettingRow title="Launch at login" description={snapshot.autostart.supported ? 'Start CodexRouter hidden when you sign in to macOS.' : 'Available in the packaged desktop app.'}>
-          <Toggle checked={snapshot.autostart.enabled} disabled={!snapshot.autostart.supported} onChange={async checked => { try { await api!.setAutostart(checked); await onRefresh(); } catch (cause) { setError(messageOf(cause)); } }} />
-        </SettingRow>
-        <SettingRow title="Model shown in Codex" description="All account/model routing happens behind this one managed row."><code>{snapshot.gateway.displayName}</code></SettingRow>
-        <SettingRow title="Router endpoint" description="Loopback only. It is not exposed to the network."><code>127.0.0.1:{snapshot.runtime.port}</code></SettingRow>
-        <SettingRow title="Codex" description={snapshot.codex.available ? 'Detected on this Mac.' : 'Install the Codex CLI before adding accounts.'}><span className="value-text">{snapshot.codex.version || 'Not found'}</span></SettingRow>
-        <SettingRow title="Local data" description="Account metadata, isolated CODEX_HOME profiles and the generated gateway catalog."><SecondaryButton icon="folder" onClick={() => void run(() => api!.revealData(), setError)}>Reveal</SecondaryButton></SettingRow>
       </div>
-      <div className="credits-panel"><Icon name="shield" /><div><strong>Open-source attribution</strong><p>The desktop UI/UX and launcher patterns are adapted from <code>miuuyy/codex-chatgpt-web</code> under the MIT License. The original notice remains in <code>LICENSES/</code>.</p></div><SecondaryButton icon="external" onClick={() => void api!.openExternal('https://github.com/miuuyy/codex-chatgpt-web')}>Upstream</SecondaryButton></div>
     </>
   );
 }

@@ -5,11 +5,18 @@
   color-scheme: light;
 
   /* Semantic accents keep the editorial base neutral while making state scannable. */
-  --color-accent: #315bea;
-  --color-success: #16834b;
-  --color-warning: #b26a00;
-  --color-error: #c62828;
-  --color-info: #5b4fd8;
+  --color-paper: #f4eddd;
+  --color-ash: #eee4d1;
+  --color-whisper: #fbf7ee;
+  --color-obsidian: #28322d;
+  --color-graphite: #53605a;
+  --color-smoke: #7d877f;
+  --color-hairline: #d8cbb5;
+  --color-accent: #315d4b;
+  --color-success: #347b7d;
+  --color-warning: #c7773e;
+  --color-error: #a64a3a;
+  --color-info: #347b7d;
 
   /* Compatibility aliases used by the component stylesheet. */
   --color-background-surface-under: var(--color-paper);
