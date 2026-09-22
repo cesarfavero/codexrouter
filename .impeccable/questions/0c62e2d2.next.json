@@ -1,0 +1,222 @@
+{
+  "title": "Choose the CodexRouter visual direction",
+  "question": "The roll assigned the Park Atlas Desk. Keep it, take an alternate, or re-roll. Each option keeps your confirmed warm, clear, colorful direction.",
+  "options": [
+    {
+      "id": "assigned",
+      "label": "Park Atlas Desk",
+      "kicker": "THE ROLL",
+      "lineage": "WPA national park travel posters and field maps",
+      "thesis": "Turn account health and request flow into a field atlas operators can scan in a glance.",
+      "palette": [
+        "#f4eddd",
+        "#315d4b",
+        "#c7773e",
+        "#347b7d",
+        "#28322d"
+      ],
+      "materials": [
+        "warm stock",
+        "flat layered inks",
+        "field marks"
+      ],
+      "viewport": "A compact left rail frames a warm operations canvas. The first view leads with live Router health, a layered route map for the active account and its quota windows, then a precise request ledger. Every layer corresponds to account, quota, model, or runtime state.",
+      "risk": "The atlas can drift into illustration; every colored plane must carry live operational meaning.",
+      "raised": [
+        {
+          "from": "Microfiche Reader",
+          "raise": "One continuous warm field stock binds navigation, overview, Jev, and activity instead of changing material language by screen."
+        }
+      ],
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "warm navigation rail",
+            "x": 0,
+            "y": 0,
+            "w": 2,
+            "h": 10
+          },
+          {
+            "label": "live route field",
+            "x": 2,
+            "y": 0,
+            "w": 10,
+            "h": 4,
+            "accent": true
+          },
+          {
+            "label": "account quota layers",
+            "x": 2,
+            "y": 4,
+            "w": 5,
+            "h": 3
+          },
+          {
+            "label": "request ledger",
+            "x": 7,
+            "y": 4,
+            "w": 5,
+            "h": 6
+          },
+          {
+            "label": "active accounts",
+            "x": 2,
+            "y": 7,
+            "w": 5,
+            "h": 3
+          }
+        ]
+      },
+      "comp": ".impeccable/mocks/decision/assigned.webp",
+      "board": "https://impeccable.style/worlds/cards/posters-covers-sleeves-wpa-park-poster.webp",
+      "hero": "https://impeccable.style/worlds/cards/posters-covers-sleeves-wpa-park-poster-hero.webp"
+    },
+    {
+      "id": "model-pick",
+      "label": "Enamel Control Bench",
+      "kicker": "IMPECCABLE\u2019S PICK",
+      "lineage": "Mid-century utility control panels",
+      "thesis": "Make account health readable as a set of dependable, color-coded instruments.",
+      "palette": [
+        "#f6f0e4",
+        "#24584b",
+        "#bd643d",
+        "#3c7d87",
+        "#3c4039"
+      ],
+      "materials": [
+        "enameled panels",
+        "painted instrument marks",
+        "soft paper"
+      ],
+      "viewport": "A slim vertical nav anchors a broad control bench. Router state owns the lead instrument; quota meters, account switches, recent events, and Jev modes share a measured grid and consistent control geometry.",
+      "risk": "Instrument imagery can add too much chrome if each value receives its own panel.",
+      "comp": ".impeccable/mocks/decision/model-pick.webp"
+    },
+    {
+      "id": "challenger-transit",
+      "label": "Transit Route Board",
+      "kicker": "ALTERNATE",
+      "verdict": "competitive",
+      "lineage": "Regional rail operations diagrams",
+      "thesis": "Show each request as a route through eligible accounts and quota stops.",
+      "palette": [
+        "#f3eddf",
+        "#1e625c",
+        "#b46c37",
+        "#496c92",
+        "#353d36"
+      ],
+      "materials": [
+        "route lines",
+        "station marks",
+        "paper timetable"
+      ],
+      "viewport": "A rail-style route map leads the overview; eligible accounts become labeled stops and quota or cooldown changes become explicit route states, with a request table below.",
+      "case": "Strong on audience identification and flow clarity; weaker than the atlas across setup, credentials, and Jev policy screens.",
+      "risk": "The metaphor may oversimplify account eligibility and quota rules.",
+      "comp": ".impeccable/mocks/challenger-transit.webp",
+      "hero": "https://impeccable.style/worlds/cards/transportation-systems-regional-railway-map.webp"
+    },
+    {
+      "id": "challenger-phosphor",
+      "label": "Phosphor Operations Terminal",
+      "verdict": "declined",
+      "lineage": "Green-phosphor machine-room consoles",
+      "thesis": "Present live traffic as a single searchable operations transcript.",
+      "palette": [
+        "#f4eddd",
+        "#285f4e",
+        "#347b7d",
+        "#c7773e"
+      ],
+      "materials": [
+        "console readout",
+        "warm enamel controls"
+      ],
+      "viewport": "A live request transcript sits beside a compact account and quota rail, with focused filters and a Jev decision trace.",
+      "case": "Clear for event investigation, but less recognizable as a place to manage accounts and model policy.",
+      "kept": "The system makes current status and live events immediately visible.",
+      "risk": "A transcript would dominate tasks that are not log investigation.",
+      "hero": "https://impeccable.style/worlds/cards/signals-instruments-phosphor-terminal-midnight-hero.webp"
+    },
+    {
+      "id": "challenger-cyclorama",
+      "label": "Dawn Cue Desk",
+      "verdict": "declined",
+      "lineage": "Theater lighting cue sheets",
+      "thesis": "Let named runtime phases clarify setup, healthy operation, and recovery.",
+      "palette": [
+        "#f4eddd",
+        "#315d4b",
+        "#c7773e",
+        "#347b7d"
+      ],
+      "materials": [
+        "cue bands",
+        "layered stage marks"
+      ],
+      "viewport": "A labeled runtime timeline distinguishes stopped, ready, active, cooldown, and error states; account and request detail remains in familiar tables.",
+      "case": "State sequencing is clear, but the theater frame adds little to multi-account administration.",
+      "kept": "Named state phases remain visible and never rely on color alone.",
+      "risk": "The lighting metaphor can obscure causal routing details.",
+      "hero": "https://impeccable.style/worlds/cards/stagecraft-theater-lighting-cyclorama-dawn-hero.webp"
+    },
+    {
+      "id": "challenger-starship",
+      "label": "Warm Mission Console",
+      "verdict": "competitive",
+      "lineage": "Used-future crew operations handbooks",
+      "thesis": "Give each account and routing policy a clear status, owner, and next action.",
+      "palette": [
+        "#f4eddd",
+        "#315d4b",
+        "#c7773e",
+        "#347b7d",
+        "#343b34"
+      ],
+      "materials": [
+        "warm panel stock",
+        "stenciled labels",
+        "status plates"
+      ],
+      "viewport": "Account status leads the overview. Setup and Jev policies use a shared panel grammar with unmistakable labels, colored states, and action rows.",
+      "case": "Operational hierarchy is strong, while its fictional lineage is less specific to real Codex account work than the atlas.",
+      "risk": "The console can become costume if stencil labels replace ordinary product language.",
+      "comp": ".impeccable/mocks/challenger-starship.webp",
+      "hero": "https://impeccable.style/worlds/cards/pop-culture-shelf-industrial-starship-terminal-hero.webp"
+    }
+  ],
+  "reroll": {
+    "registers": [
+      "safer",
+      "bolder"
+    ]
+  },
+  "buildPath": {
+    "value": "code",
+    "toggle": true
+  },
+  "canon": true,
+  "canonCard": {
+    "label": "The category standard",
+    "thesis": "A familiar, polished desktop admin console with navigation, summary panels, tables, and conventional forms.",
+    "palette": [
+      "#faf9f6",
+      "#27352e",
+      "#397b6b"
+    ],
+    "materials": [
+      "quiet warm canvas",
+      "clear product panels",
+      "legible tables"
+    ],
+    "viewport": "A vertical sidebar frames a live operations overview with account health, request activity, and a conventional settings area; Jev sits in its own nav destination.",
+    "risk": "Familiar patterns make it easy to operate but less distinctive to CodexRouter.",
+    "comp": ".impeccable/mocks/decision/canon.webp"
+  },
+  "steer": true
+}

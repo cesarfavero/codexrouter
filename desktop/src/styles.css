@@ -66,7 +66,7 @@ code { font-family: var(--font-mono); font-size: 12px; }
 .account-list { border-top: 1px solid var(--color-hairline); }
 .account-row { min-height: 84px; display: grid; grid-template-columns: 40px minmax(180px, 1fr) 168px 104px auto; align-items: center; gap: 16px; border-bottom: 1px solid var(--color-hairline); cursor: pointer; transition: background var(--duration-micro); }
 .account-row:hover, .account-row:focus-visible { background: var(--color-whisper); outline: 0; }
-.account-row:has(.soft-badge) { box-shadow: inset 3px 0 0 var(--color-accent); }
+.account-row:has(.soft-badge) { background: color-mix(in srgb, var(--color-accent) 4%, transparent); }
 .account-avatar { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--color-hairline); border-radius: 50%; background: var(--color-ash); color: var(--color-obsidian); font-size: 13px; font-weight: 500; }
 .account-identity { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .account-title-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -294,4 +294,60 @@ code { font-family: var(--font-mono); font-size: 12px; }
   .account-status { display: none; }
   .account-actions { grid-column: 2 / -1; justify-content: flex-start; }
   .modal { padding: 24px; }
+}
+
+/* Warm Atlas surface: one shared geometry for every route. */
+.app-root { grid-template-columns: 238px minmax(0, 1fr); grid-template-rows: 1fr; background: var(--color-paper); }
+.sidebar { grid-column: 1; grid-row: 1; flex-direction: column; align-items: stretch; min-height: 0; padding: 30px 18px 20px; border-right: 1px solid var(--color-hairline); background: var(--color-ash); }
+.platform-darwin .sidebar { padding-left: 18px; }
+.sidebar-brand { padding: 0 10px 28px; }
+.sidebar-brand strong { color: var(--color-accent); font-size: 16px; letter-spacing: -.02em; }
+.sidebar-brand span { color: var(--color-graphite); }
+.brand-mark { background-color: var(--color-paper); box-shadow: 0 4px 14px rgb(40 50 45 / 12%); }
+.sidebar-nav { flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 22px; margin: 0; overflow-y: auto; }
+.nav-group { display: grid; gap: 6px; }
+.nav-group > span { display: block; padding: 0 10px 4px; color: var(--color-graphite); font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.nav-item { width: 100%; min-height: 42px; padding: 10px 12px; border-radius: 11px; color: var(--color-graphite); }
+.nav-item:hover { background: color-mix(in srgb, var(--color-paper) 74%, transparent); color: var(--color-obsidian); }
+.nav-item.is-active { background: var(--color-accent); color: var(--color-paper); box-shadow: 0 5px 12px rgb(49 93 75 / 18%); }
+.nav-item svg, .nav-item.is-active svg { color: currentColor; }
+.nav-item em { margin-left: auto; background: color-mix(in srgb, var(--color-paper) 62%, transparent); color: var(--color-obsidian); }
+.sidebar-footer { display: grid; gap: 14px; margin: 22px 0 0; padding-top: 18px; border-top: 1px solid var(--color-hairline); }
+.runtime-mini { padding: 0 8px; }
+.runtime-mini span:not(.status-dot) { max-width: 180px; }
+.sidebar-codex { width: 100%; justify-content: center; background: var(--color-obsidian); }
+.main-shell { grid-column: 2; grid-row: 1; background: var(--color-paper); }
+.titlebar { min-height: 46px; padding: 0 42px; background: var(--color-paper); }
+.content-scroll { background: var(--color-paper); }
+.surface { width: min(calc(100% - 84px), 1180px); padding: 48px 0 76px; }
+.surface-header { margin-bottom: 32px; }
+.eyebrow { color: var(--color-accent); letter-spacing: .08em; text-transform: uppercase; }
+.surface-header h1 { color: var(--color-obsidian); font-weight: 650; }
+.surface-header p { color: var(--color-graphite); }
+.button.primary { border-color: var(--color-accent); background: var(--color-accent); }
+.button.secondary { border-color: var(--color-hairline); background: var(--color-whisper); }
+.button.secondary:hover:not(:disabled) { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 10%, var(--color-paper)); color: var(--color-accent); }
+.metric, .overview-panel, .quota-panel, .log-view, .modal { border-color: var(--color-hairline); background: var(--color-whisper); box-shadow: 0 8px 24px rgb(84 65 38 / 5%); }
+.overview-hero { padding: 28px 24px; border: 0; border-radius: 16px; background: var(--color-accent); color: var(--color-paper); box-shadow: 0 10px 26px rgb(49 93 75 / 16%); }
+.overview-hero p, .overview-hero .hero-pulse { color: color-mix(in srgb, var(--color-paper) 84%, transparent); }
+.overview-hero strong { color: var(--color-paper); }
+.setting-row { border-bottom-color: var(--color-hairline); }
+.setting-value select, .setting-value input, .modal input { border-color: var(--color-hairline); background-color: var(--color-whisper); }
+.setting-value select { appearance: none; padding-right: 38px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none' stroke='%23315d4b' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 5 4 4 4-4'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 13px center; }
+.jev-model-policy-row { border-color: var(--color-hairline); background: var(--color-whisper); }
+.credits-panel { border-color: var(--color-hairline); }
+.status-dot.success { background: var(--color-success); }
+.content-scroll::-webkit-scrollbar-thumb { background-color: var(--color-hairline); }
+
+@media (max-width: 760px) {
+  .app-root { display: flex; flex-direction: column; }
+  .sidebar { flex: 0 0 auto; border-right: 0; border-bottom: 1px solid var(--color-hairline); padding: 18px; }
+  .sidebar-brand { padding-bottom: 16px; }
+  .sidebar-nav { flex-direction: row; gap: 12px; overflow-x: auto; }
+  .nav-group { display: flex; flex-direction: row; align-items: center; }
+  .nav-group > span { display: none; }
+  .nav-item { width: auto; white-space: nowrap; }
+  .sidebar-footer { display: none; }
+  .main-shell { min-height: 0; }
+  .surface { width: min(calc(100% - 36px), 1180px); padding-top: 30px; }
 }
