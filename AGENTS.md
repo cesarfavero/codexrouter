@@ -11,7 +11,7 @@ CodexRouter presents one managed `Router` model in the native Codex picker. The 
 - The gateway may automatically select another healthy account when the active account is exhausted or near its usage limit.
 - Do not aggregate multiple subscriptions into a single effective quota pool.
 - Discover selectable native models from each account's current Codex CLI catalog; do not maintain version-specific model lists. Preserve valid user-selected models, and base automatic selection only on models reported by that account.
-- Pass native `/v1/responses` WebSocket upgrades through to the official Codex upstream with main-session auth; keep them outside gateway account and Jev routing.
+- Return `426 Upgrade Required` for `/v1/responses` capability negotiation and WebSocket upgrades so Codex falls back to HTTP/SSE. This keeps resumed conversations and Goals on the account-aware routing path, where the gateway slug is replaced with the selected account's native model.
 
 ## Non-goals
 

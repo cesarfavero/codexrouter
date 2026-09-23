@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -46,128 +45,34 @@ async function fixture() {
 
 test('responses capability negotiation falls back from WebSocket to HTTP/SSE', async () => {
   const state = await fixture();
-  const upstream = http.createServer((_req, res) => {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ websocket: true }));
-  });
-  upstream.listen(0, '127.0.0.1');
-  await once(upstream, 'listening');
-  const router = startRouter({ port: 0, officialUpstreamBase: `http://127.0.0.1:${upstream.address().port}/backend-api/codex` });
+  const events = [];
+  const router = startRouter({ port: 0, onRequest: event => events.push(event) });
   await once(router, 'listening');
   try {
     const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`);
-    assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { websocket: true });
+    assert.equal(response.status, 426);
+    assert.match(await response.text(), /Responses WebSocket transport is not enabled/);
+    assert.deepEqual(events.map(event => [event.transport, event.status]), [['websocket-negotiation', 426]]);
   } finally {
     await new Promise(resolve => router.close(resolve));
-    await new Promise(resolve => upstream.close(resolve));
     state.restore();
   }
 });
 
-test('responses WebSocket upgrade is proxied to the official upstream with main Codex auth', async () => {
+test('responses WebSocket upgrade is rejected locally so the request can use account-aware HTTP/SSE', async () => {
   const state = await fixture();
-  const previousCodexHome = process.env.CODEX_HOME;
-  const mainHome = path.join(state.root, 'main-codex-home');
-  const accessToken = jwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
-  fs.mkdirSync(mainHome, { recursive: true });
-  writeJsonAtomic(path.join(mainHome, 'auth.json'), {
-    tokens: { id_token: jwt({}), access_token: accessToken, refresh_token: 'main-refresh', account_id: 'main-account' },
-  });
-  process.env.CODEX_HOME = mainHome;
-  let seen = null;
   const events = [];
-  let upstreamSocket = null;
-  const upstream = http.createServer();
-  upstream.on('upgrade', (req, socket) => {
-    seen = {
-      url: req.url,
-      authorization: req.headers.authorization,
-      accountId: req.headers['chatgpt-account-id'],
-      upgrade: req.headers.upgrade,
-    };
-    upstreamSocket = socket;
-    const accept = crypto.createHash('sha1')
-      .update(`${req.headers['sec-websocket-key']}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
-      .digest('base64');
-    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
-    socket.on('data', chunk => socket.write(chunk));
-  });
-  upstream.listen(0, '127.0.0.1');
-  await once(upstream, 'listening');
-  const router = startRouter({
-    port: 0,
-    officialUpstreamBase: `http://127.0.0.1:${upstream.address().port}/backend-api/codex`,
-    onRequest: event => events.push(event),
-  });
-  await once(router, 'listening');
-  try {
-    const { response, socket } = await new Promise((resolve, reject) => {
-      const request = http.request({
-        port: router.address().port,
-        path: '/v1/responses?transport=websocket',
-        headers: {
-          authorization: 'Bearer incoming-codex-token',
-          connection: 'Upgrade',
-          upgrade: 'websocket',
-          'sec-websocket-key': crypto.randomBytes(16).toString('base64'),
-          'sec-websocket-version': '13',
-        },
-      });
-      request.once('upgrade', (upstreamResponse, clientSocket) => resolve({ response: upstreamResponse, socket: clientSocket }));
-      request.once('response', incoming => reject(new Error(`unexpected HTTP response: ${incoming.statusCode}`)));
-      request.once('error', reject);
-      request.end();
-    });
-    assert.equal(response.statusCode, 101);
-    assert.deepEqual(seen, {
-      url: '/backend-api/codex/responses?transport=websocket',
-      authorization: `Bearer ${accessToken}`,
-      accountId: 'main-account',
-      upgrade: 'websocket',
-    });
-    assert.deepEqual(events.map(event => [event.transport, event.status]), [['official-websocket', 101]]);
-    const echo = new Promise(resolve => socket.once('data', resolve));
-    socket.write('websocket-data');
-    assert.equal((await echo).toString(), 'websocket-data');
-    socket.destroy();
-  } finally {
-    router.closeRouterConnections();
-    await new Promise(resolve => router.close(resolve));
-    upstreamSocket?.destroy();
-    await new Promise(resolve => upstream.close(resolve));
-    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
-    else process.env.CODEX_HOME = previousCodexHome;
-    state.restore();
-  }
-});
-
-test('responses WebSocket upstream rejection is forwarded to the Codex client', async () => {
-  const state = await fixture();
-  const previousCodexHome = process.env.CODEX_HOME;
-  process.env.CODEX_HOME = path.join(state.root, 'empty-main-codex-home');
-  let upstreamSocket = null;
-  const upstream = http.createServer();
-  upstream.on('upgrade', (_req, socket) => {
-    upstreamSocket = socket;
-    socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: 7\r\n\r\nblocked');
-  });
-  upstream.listen(0, '127.0.0.1');
-  await once(upstream, 'listening');
-  const router = startRouter({
-    port: 0,
-    officialUpstreamBase: `http://127.0.0.1:${upstream.address().port}/backend-api/codex`,
-  });
+  const router = startRouter({ port: 0, onRequest: event => events.push(event) });
   await once(router, 'listening');
   try {
     const response = await new Promise((resolve, reject) => {
       const request = http.request({
         port: router.address().port,
-        path: '/v1/responses',
+        path: '/v1/responses?transport=websocket',
         headers: {
           connection: 'Upgrade',
           upgrade: 'websocket',
-          'sec-websocket-key': crypto.randomBytes(16).toString('base64'),
+          'sec-websocket-key': 'test-key',
           'sec-websocket-version': '13',
         },
       });
@@ -176,17 +81,11 @@ test('responses WebSocket upstream rejection is forwarded to the Codex client', 
       request.once('error', reject);
       request.end();
     });
-    assert.equal(response.statusCode, 403);
-    let body = '';
-    for await (const chunk of response) body += chunk.toString();
-    assert.equal(body, 'blocked');
+    assert.equal(response.statusCode, 426);
+    assert.deepEqual(events.map(event => [event.transport, event.status]), [['websocket-negotiation', 426]]);
   } finally {
     router.closeRouterConnections();
     await new Promise(resolve => router.close(resolve));
-    upstreamSocket?.destroy();
-    await new Promise(resolve => upstream.close(resolve));
-    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
-    else process.env.CODEX_HOME = previousCodexHome;
     state.restore();
   }
 });
