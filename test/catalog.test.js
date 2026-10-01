@@ -6,7 +6,7 @@ test('gateway catalog exposes the gateway and active account native models', () 
   const cesar = {
     models: [
       { slug: 'gpt-5.6-sol', display_name: 'GPT-5.6 Sol', visibility: 'list', context_window: 100, is_default: true },
-      { slug: 'gpt-5.5', display_name: 'GPT-5.5', visibility: 'list', context_window: 80 },
+      { slug: 'gpt-5.5', display_name: 'GPT-5.5', visibility: 'list', context_window: 80, use_responses_lite: false },
     ],
   };
   const eduardo = {
@@ -22,9 +22,11 @@ test('gateway catalog exposes the gateway and active account native models', () 
   assert.equal(result.models[0].slug, GATEWAY_SLUG);
   assert.equal(result.models[0].display_name, 'Router');
   assert.equal(result.models[0].context_window, 100);
+  assert.equal(result.models[0].use_responses_lite, false);
   assert.equal(result.models[1].slug, 'gpt-5.6-sol');
   assert.equal(result.models[1].display_name, 'Router · GPT-5.6 Sol');
   assert.equal(result.models[2].slug, 'gpt-5.5');
+  assert.equal(result.models[2].use_responses_lite, false);
   assert.equal(result.models.some(model => model.slug.startsWith('codexrouter/eduardo/')), false);
 });
 

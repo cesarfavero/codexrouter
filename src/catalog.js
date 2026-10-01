@@ -71,6 +71,9 @@ export function buildGatewayCatalog(accountCatalogs, activeAccountId) {
   gateway.description = 'CodexRouter managed gateway. Select this model to use automatic account switching.';
   gateway.visibility = 'list';
   gateway.supported_in_api = true;
+  // Router may resolve to a different native model, including models that do
+  // not support Responses Lite. Keep the gateway on the full Responses path.
+  gateway.use_responses_lite = false;
   gateway.is_default = true;
   gateway.upgrade = null;
   delete gateway.availability_nux;
