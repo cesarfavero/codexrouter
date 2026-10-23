@@ -6,7 +6,9 @@ CodexRouter 是一个本地网关，可在 Codex 中管理多个相互隔离的 
 
 ## 下载
 
-请从 [GitHub Releases](https://github.com/cesarfavero/codexrouter/releases) 下载 macOS 应用。选择与你的 Mac 架构匹配的 DMG，将 CodexRouter 拖到 Applications 后打开。官方 Codex CLI 需要单独安装。
+请从 [GitHub Releases](https://github.com/cesarfavero/codexrouter/releases) 下载桌面应用。macOS 用户请选择适合 Mac 架构的 DMG，并将 CodexRouter 拖到 Applications；Windows 用户请选择 x64 安装程序。官方 Codex CLI 需要单独安装。
+
+安装后的 Windows 应用会检查 GitHub Releases 中的新版本。发现更新时，点击应用中的更新按钮即可下载并重启安装。
 
 ## 从源码安装
 

@@ -32,6 +32,8 @@ Prefer the official installed Codex CLI for login, logout, status and refresh be
 
 For repository work, create/link an Issue, use a branch, make focused commits, open a PR, run tests/checks, review, and merge completed work to `main` unless an issue explicitly requires otherwise. After each validated code or product update, increment the version when applicable, build the distributable artifacts, publish the corresponding GitHub release, and install the freshly built macOS app over the current `/Applications/CodexRouter.app` installation when a macOS build is available.
 
+Windows auto-updates require each GitHub release to include the NSIS `.exe`, its `.blockmap`, and the matching `latest.yml` from the same build. Keep the update action user-initiated and verify those assets after publishing.
+
 ## Jev semantic routing
 
 - Treat Jev as a typed semantic advisor, not as authority over authentication, account eligibility, quota/cooldown, permissions, dates, exact calculations or irreversible actions.

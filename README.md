@@ -16,7 +16,9 @@ The desktop app decides which authenticated account and which native Codex model
 
 ## Download
 
-The macOS desktop app is published in [GitHub Releases](https://github.com/cesarfavero/codexrouter/releases). Download the DMG matching your Mac, drag CodexRouter to Applications, and open it. The official Codex CLI must be installed separately.
+The macOS and Windows desktop apps are published in [GitHub Releases](https://github.com/cesarfavero/codexrouter/releases). On macOS, download the DMG matching your Mac and drag CodexRouter to Applications. On Windows, download the x64 installer. The official Codex CLI must be installed separately.
+
+The installed Windows app checks GitHub Releases for updates. When a new version is available, the app shows an update action that downloads the installer and restarts to apply it after you click.
 
 For installation from source, see [docs/installation-from-source.md](docs/installation-from-source.md).
 
