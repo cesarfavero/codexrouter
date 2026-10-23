@@ -621,6 +621,7 @@ function AddAccountModal({ login, onClose, onComplete, setError }: {
   };
   const copyLoginUrl = async () => {
     if (!login?.url) return;
+    setLoginUrlCopied(false);
     try {
       await navigator.clipboard.writeText(login.url);
       setLoginUrlCopied(true);
