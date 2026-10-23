@@ -11,7 +11,7 @@ const { getAutostart, setAutostart } = require('./autostart.cjs');
 const DEFAULT_PORT = Number(process.env.CODEXROUTER_PORT || 17842);
 const VALID_EFFORTS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh']);
 const TRAY_ICON = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAkElEQVR4nO2XSw6AMAhEwXj/K+PKpLF8ay1pZLbWmQcYUYDS34WeQ0REwwGIaoZ68U2wF+RYEa75sQCzwzVfsQOr1M3Fqt56qKIep2UWCX6e9YwyfQQugEj10fv26EABFEABpAOMbsctXsXuZXRXM2MbtmLNvvogAegLSB8BCzC6/SxxvmIHZkNIfun/BaV0XTuOPDLd7faPAAAAAElFTkSuQmCC';
-const UPDATE_CHECK_URL = 'https://api.github.com/repos/cesarfavero/codexrouter/releases/latest';
+const UPDATE_RELEASE_URL = 'https://github.com/cesarfavero/codexrouter/releases/latest';
 const LOG_PATH = path.join(os.homedir(), '.codexrouter', 'logs', 'router.jsonl');
 const JEV_SETTINGS_PATH = path.join(os.homedir(), '.codexrouter', 'jev-settings.json');
 const JEV_MODES = new Set(['off', 'observe', 'active']);
@@ -25,7 +25,13 @@ let routerPort = DEFAULT_PORT;
 let isQuitting = false;
 let corePromise = null;
 let updateTimer = null;
+let catalogRefreshTimer = null;
+let backgroundCatalogRefresh = null;
+let catalogSyncQueue = Promise.resolve();
 let updateInfo = null;
+let updateStatus = null;
+let updateProgress = 0;
+let updateApplyPromise = null;
 let autoUpdateCapability = null;
 const logs = loadLogs();
 
@@ -278,7 +284,7 @@ async function checkForUpdates() {
 function canUseAutoUpdater() {
   if (autoUpdateCapability != null) return autoUpdateCapability;
   if (!app.isPackaged || process.platform !== 'darwin') {
-    autoUpdateCapability = Boolean(app.isPackaged);
+    autoUpdateCapability = app.isPackaged;
     return autoUpdateCapability;
   }
   const appBundle = path.resolve(app.getPath('exe'), '..', '..', '..');
@@ -288,6 +294,12 @@ function canUseAutoUpdater() {
     record('warning', 'Automatic updates disabled because this macOS build is not signed with a valid Developer ID certificate.');
   }
   return autoUpdateCapability;
+}
+
+function updateUnavailableMessage() {
+  return process.platform === 'darwin'
+    ? 'Automatic updates require a signed macOS build.'
+    : 'Automatic updates require an installed CodexRouter app.';
 }
 
 function isNewerVersion(candidate, current) {
@@ -362,6 +374,12 @@ async function snapshot() {
     version: app.getVersion(),
     platform: process.platform,
     packaged: app.isPackaged,
+    update: updateInfo ? {
+      version: updateInfo.version,
+      url: updateInfo.releaseUrl || UPDATE_RELEASE_URL,
+      state: updateStatus,
+      progress: updateProgress,
+    } : null,
     accounts,
     defaultAccountId: registry.defaultAccountId,
     integration: {
@@ -482,18 +500,34 @@ async function stopRuntime({ restoreIntegration = true } = {}) {
   return snapshot();
 }
 
+function synchronizeCatalog() {
+  const pending = catalogSyncQueue.then(async () => {
+    const { store, catalog } = await core();
+    return catalog.syncCatalogAsync(store.loadRegistry());
+  });
+  catalogSyncQueue = pending.catch(() => {});
+  return pending;
+}
+
 async function syncCatalogBestEffort() {
-  const { store, catalog } = await core();
-  const registry = store.loadRegistry();
-  if (!registry.accounts.length) return null;
   try {
-    const result = catalog.syncCatalog(registry);
+    const { store } = await core();
+    if (!store.loadRegistry().accounts.length) return null;
+    const result = await synchronizeCatalog();
     record('info', `Gateway catalog synchronized. Active account: ${result.activeAccount.label}; native model: ${result.nativeModel}.`);
     return result;
   } catch (error) {
     record('warning', `Catalog sync deferred: ${error.message}`);
     return null;
   }
+}
+
+function refreshCatalogInBackground() {
+  if (backgroundCatalogRefresh) return backgroundCatalogRefresh;
+  backgroundCatalogRefresh = syncCatalogBestEffort()
+    .then(result => { if (result) sendEvent({ type: 'snapshot-invalidated' }); })
+    .finally(() => { backgroundCatalogRefresh = null; });
+  return backgroundCatalogRefresh;
 }
 
 function validateLabel(value) {
@@ -543,17 +577,42 @@ async function authenticateAccount(account, operationName, { reuseMainSession = 
 function registerIpc() {
   ipcMain.handle('codexrouter:snapshot', () => snapshot());
   ipcMain.handle('codexrouter:update:download', async () => {
-    if (!canUseAutoUpdater()) throw new Error('Automatic updates require a signed macOS build.');
+    if (!canUseAutoUpdater()) throw new Error(updateUnavailableMessage());
     if (!updateInfo) throw new Error('No update is available.');
     await autoUpdater.downloadUpdate();
     return { ok: true };
   });
   ipcMain.handle('codexrouter:update:install', () => {
-    if (!canUseAutoUpdater()) throw new Error('Automatic updates require a signed macOS build.');
-    if (!updateInfo) throw new Error('No update is ready.');
+    if (!canUseAutoUpdater()) throw new Error(updateUnavailableMessage());
+    if (!updateInfo || updateStatus !== 'ready') throw new Error('No update is ready.');
     isQuitting = true;
     autoUpdater.quitAndInstall(false, true);
     return { ok: true };
+  });
+  ipcMain.handle('codexrouter:update:apply', () => {
+    if (updateApplyPromise) return updateApplyPromise;
+    updateApplyPromise = (async () => {
+      if (!canUseAutoUpdater()) throw new Error(updateUnavailableMessage());
+      if (!updateInfo) throw new Error('No update is available.');
+      if (updateStatus !== 'ready') {
+        updateStatus = 'downloading';
+        updateProgress = 0;
+        await autoUpdater.downloadUpdate();
+      }
+      if (updateStatus !== 'ready') throw new Error('The update download did not complete.');
+      updateStatus = 'installing';
+      sendEvent({ type: 'update-state', state: 'installing' });
+      isQuitting = true;
+      autoUpdater.quitAndInstall(false, true);
+      return { ok: true };
+    })().catch(error => {
+      if (updateInfo) {
+        updateStatus = 'error';
+        sendEvent({ type: 'update-state', state: 'error', message: error.message });
+      }
+      throw error;
+    }).finally(() => { updateApplyPromise = null; });
+    return updateApplyPromise;
   });
 
   ipcMain.handle('codexrouter:account:add', (_event, rawLabel, rawAuthMode) => withOperation('Add account', async () => {
@@ -625,16 +684,15 @@ function registerIpc() {
   }));
 
   ipcMain.handle('codexrouter:catalog:sync', () => withOperation('Sync gateway catalog', async () => {
-    const { store, catalog } = await core();
-    const result = catalog.syncCatalog(store.loadRegistry());
+    const result = await synchronizeCatalog();
     record('info', `Gateway catalog synchronized. Active account: ${result.activeAccount.label}; native model: ${result.nativeModel}.`);
     sendEvent({ type: 'snapshot-invalidated' });
     return snapshot();
   }));
 
   ipcMain.handle('codexrouter:integration:install', () => withOperation('Install Codex integration', async () => {
-    const { store, catalog, integration } = await core();
-    catalog.syncCatalog(store.loadRegistry());
+    const { integration } = await core();
+    await synchronizeCatalog();
     const journal = integration.installIntegration({ port: DEFAULT_PORT });
     record('info', 'Codex integration installed. Restart Codex to refresh the single gateway model.');
     await startRuntime(journal.port);
@@ -828,17 +886,38 @@ function wireInternalEvents() {
 
 function wireAutoUpdater() {
   autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.on('checking-for-update', () => sendEvent({ type: 'update-state', state: 'checking' }));
   autoUpdater.on('update-available', info => {
     updateInfo = info;
-    sendEvent({ type: 'update-available', version: info.version, url: info.releaseUrl || UPDATE_CHECK_URL });
+    updateStatus = 'available';
+    updateProgress = 0;
+    sendEvent({ type: 'update-available', version: info.version, url: info.releaseUrl || UPDATE_RELEASE_URL });
     record('info', `Update ${info.version} available for ${process.platform}.`);
   });
-  autoUpdater.on('update-not-available', () => sendEvent({ type: 'update-state', state: 'up-to-date' }));
-  autoUpdater.on('download-progress', progress => sendEvent({ type: 'update-progress', percent: progress.percent, transferred: progress.transferred, total: progress.total }));
-  autoUpdater.on('update-downloaded', info => { updateInfo = info; sendEvent({ type: 'update-downloaded', version: info.version }); record('info', `Update ${info.version} downloaded and ready to install.`); });
-  autoUpdater.on('error', error => { record('error', `Updater: ${error.message}`); sendEvent({ type: 'update-state', state: 'error', message: error.message }); });
+  autoUpdater.on('update-not-available', () => {
+    updateInfo = null;
+    updateStatus = null;
+    updateProgress = 0;
+    sendEvent({ type: 'update-state', state: 'up-to-date' });
+  });
+  autoUpdater.on('download-progress', progress => {
+    updateStatus = 'downloading';
+    updateProgress = progress.percent;
+    sendEvent({ type: 'update-progress', percent: progress.percent, transferred: progress.transferred, total: progress.total });
+  });
+  autoUpdater.on('update-downloaded', info => {
+    updateInfo = info;
+    updateStatus = 'ready';
+    updateProgress = 100;
+    sendEvent({ type: 'update-downloaded', version: info.version });
+    record('info', `Update ${info.version} downloaded and ready to install.`);
+  });
+  autoUpdater.on('error', error => {
+    if (updateInfo) updateStatus = 'error';
+    record('error', `Updater: ${error.message}`);
+    sendEvent({ type: 'update-state', state: 'error', message: error.message });
+  });
 }
 
 const lock = app.requestSingleInstanceLock();
@@ -846,7 +925,7 @@ if (!lock) {
   app.quit();
 } else {
   app.on('second-instance', showWindow);
-  app.on('before-quit', () => { isQuitting = true; if (updateTimer) clearInterval(updateTimer); });
+  app.on('before-quit', () => { isQuitting = true; if (updateTimer) clearInterval(updateTimer); if (catalogRefreshTimer) clearInterval(catalogRefreshTimer); });
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin' && !tray) app.quit();
   });
@@ -862,6 +941,8 @@ if (!lock) {
     void checkForUpdates();
     updateTimer = setInterval(() => void checkForUpdates(), 6 * 60 * 60 * 1000);
     await restoreRuntimeIfInstalled();
+    void refreshCatalogInBackground();
+    catalogRefreshTimer = setInterval(() => void refreshCatalogInBackground(), 60 * 60 * 1000);
   }).catch(error => {
     console.error(error);
     app.quit();

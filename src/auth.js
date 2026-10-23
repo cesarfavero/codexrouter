@@ -1,8 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { ensureDir, readJson, writeTextAtomic } from './fs-util.js';
 import { mainCodexHome } from './paths.js';
+
+const execFileAsync = promisify(execFile);
 
 export function codexBinary() {
   const configured = process.env.CODEX_BIN?.trim();
@@ -19,12 +22,23 @@ export function codexBinary() {
   ];
   for (const directory of candidates) {
     if (!directory) continue;
-    const binary = path.join(directory, 'codex');
-    try {
-      if (fs.existsSync(binary) && fs.statSync(binary).isFile() && (fs.statSync(binary).mode & 0o111)) return binary;
-    } catch {}
+    for (const name of process.platform === 'win32' ? ['codex.exe', 'codex.cmd', 'codex.bat'] : ['codex']) {
+      const binary = path.join(directory, name);
+      try {
+        if (fs.existsSync(binary) && fs.statSync(binary).isFile()
+          && (process.platform === 'win32' || (fs.statSync(binary).mode & 0o111))) return binary;
+      } catch {}
+    }
   }
-  return 'codex';
+  return process.platform === 'win32' ? 'codex.cmd' : 'codex';
+}
+
+function codexCommandOptions(binary) {
+  // npm installs Codex as a .cmd shim on Windows. Node needs cmd.exe to launch it.
+  // All arguments at these call sites are fixed Codex subcommands.
+  return process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(binary)
+    ? { shell: true }
+    : {};
 }
 
 export function prepareAccountCodexHome(codexHome) {
@@ -61,7 +75,9 @@ export function reuseMainCodexSession(codexHome) {
 
 function runCodex(codexHome, args, options = {}) {
   prepareAccountCodexHome(codexHome);
-  const result = spawnSync(codexBinary(), args, {
+  const binary = codexBinary();
+  const result = spawnSync(binary, args, {
+    ...codexCommandOptions(binary),
     env: { ...process.env, CODEX_HOME: codexHome },
     stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
     encoding: options.capture ? 'utf8' : undefined,
@@ -103,7 +119,9 @@ export function loginInteractive(codexHome, {
   prepareAccountCodexHome(codexHome);
 
   return new Promise((resolve, reject) => {
-    const child = spawn(codexBinary(), ['login'], {
+    const binary = codexBinary();
+    const child = spawn(binary, ['login'], {
+      ...codexCommandOptions(binary),
       env: { ...process.env, CODEX_HOME: codexHome },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -189,6 +207,22 @@ export function refreshViaCodex(codexHome) {
 
 export function fetchNativeCatalog(codexHome) {
   const output = runCodex(codexHome, ['debug', 'models'], { capture: true, timeout: 120_000 }).stdout;
+  return parseNativeCatalogOutput(output);
+}
+
+export async function fetchNativeCatalogAsync(codexHome) {
+  prepareAccountCodexHome(codexHome);
+  const binary = codexBinary();
+  const { stdout } = await execFileAsync(binary, ['debug', 'models'], {
+    ...codexCommandOptions(binary),
+    env: { ...process.env, CODEX_HOME: codexHome },
+    timeout: 120_000,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  return parseNativeCatalogOutput(stdout);
+}
+
+function parseNativeCatalogOutput(output) {
   const firstBrace = output.indexOf('{');
   const firstBracket = output.indexOf('[');
   const startCandidates = [firstBrace, firstBracket].filter(index => index >= 0);
