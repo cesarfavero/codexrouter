@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GATEWAY_SLUG, buildGatewayCatalog, chooseNativeModel, summarizeNativeModels } from '../src/catalog.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { GATEWAY_SLUG, buildGatewayCatalog, chooseNativeModel, summarizeNativeModels, syncCatalogAsync } from '../src/catalog.js';
+import { catalogPath } from '../src/paths.js';
+import { loadRegistry, registerAccount, updateAccount } from '../src/store.js';
 
 test('gateway catalog exposes the gateway and active account native models', () => {
   const cesar = {
@@ -48,4 +53,62 @@ test('summarizes only selectable native models', () => {
     { slug: 'codexrouter/gateway', visibility: 'list' },
   ] });
   assert.deepEqual(result, [{ slug: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' }]);
+});
+
+test('async catalog refresh discovers current CLI models and keeps a valid user choice', { skip: process.platform === 'win32' }, async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codexrouter-model-refresh-'));
+  const previousHome = process.env.CODEXROUTER_HOME;
+  const previousCodexBin = process.env.CODEX_BIN;
+  try {
+    const binary = path.join(directory, 'codex');
+    fs.writeFileSync(binary, `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ models: [\n  { slug: 'gpt-old', visibility: 'list', display_name: 'Old' },\n  { slug: 'gpt-new', visibility: 'list', display_name: 'New' },\n] }));\n`);
+    fs.chmodSync(binary, 0o755);
+    process.env.CODEXROUTER_HOME = directory;
+    process.env.CODEX_BIN = binary;
+    fs.writeFileSync(path.join(directory, 'accounts.json'), JSON.stringify({ version: 1, defaultAccountId: null, accounts: [] }));
+    const account = registerAccount('Test account');
+    updateAccount(account.id, { preferredModel: 'gpt-old', modelSelectionSource: 'user' });
+
+    await syncCatalogAsync(loadRegistry());
+
+    const updated = loadRegistry().accounts[0];
+    assert.equal(updated.preferredModel, 'gpt-old');
+    assert.deepEqual(updated.availableModels.map(model => model.slug), ['gpt-old', 'gpt-new']);
+    const gateway = JSON.parse(fs.readFileSync(catalogPath(), 'utf8'));
+    assert.deepEqual(gateway.models.map(model => model.slug), [GATEWAY_SLUG, 'gpt-old', 'gpt-new']);
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEXROUTER_HOME;
+    else process.env.CODEXROUTER_HOME = previousHome;
+    if (previousCodexBin === undefined) delete process.env.CODEX_BIN;
+    else process.env.CODEX_BIN = previousCodexBin;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('async refresh keeps the existing gateway when the active account catalog is unavailable', { skip: process.platform === 'win32' }, async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codexrouter-catalog-fallback-'));
+  const previousHome = process.env.CODEXROUTER_HOME;
+  const previousCodexBin = process.env.CODEX_BIN;
+  try {
+    const binary = path.join(directory, 'codex');
+    fs.writeFileSync(binary, `#!/usr/bin/env node\nif (process.env.CODEX_HOME.includes('/accounts/active/')) process.exit(1);\nprocess.stdout.write(JSON.stringify({ models: [{ slug: 'fallback-model', visibility: 'list' }] }));\n`);
+    fs.chmodSync(binary, 0o755);
+    process.env.CODEXROUTER_HOME = directory;
+    process.env.CODEX_BIN = binary;
+    fs.writeFileSync(path.join(directory, 'accounts.json'), JSON.stringify({ version: 1, defaultAccountId: null, accounts: [] }));
+    registerAccount('Active');
+    registerAccount('Fallback');
+    const previousCatalog = { models: [{ slug: GATEWAY_SLUG, visibility: 'list' }] };
+    fs.writeFileSync(catalogPath(), JSON.stringify(previousCatalog));
+
+    await assert.rejects(syncCatalogAsync(loadRegistry()), /active account.*did not return/i);
+
+    assert.deepEqual(JSON.parse(fs.readFileSync(catalogPath(), 'utf8')), previousCatalog);
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEXROUTER_HOME;
+    else process.env.CODEXROUTER_HOME = previousHome;
+    if (previousCodexBin === undefined) delete process.env.CODEX_BIN;
+    else process.env.CODEX_BIN = previousCodexBin;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });

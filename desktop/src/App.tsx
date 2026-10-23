@@ -1,7 +1,7 @@
 // UI structure and interaction language adapted from the MIT-licensed
 // miuuyy/codex-chatgpt-web launcher. Product flows are CodexRouter-specific.
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon, type IconName } from './icons';
 import type { AccountSummary, AccountUsage, LauncherEvent, LogRecord, Operation, Snapshot } from './types';
 
@@ -21,12 +21,18 @@ export function App() {
   const [update, setUpdate] = useState<{ version: string; url: string } | null>(null);
   const [updateState, setUpdateState] = useState<'available' | 'downloading' | 'ready' | 'installing' | 'error' | null>(null);
   const [updateProgress, setUpdateProgress] = useState(0);
+  const dismissedUpdateVersion = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!api) return;
     const next = await api.snapshot();
     setSnapshot(next);
     setLogs(next.logs);
+    if (next.update && next.update.version !== dismissedUpdateVersion.current) {
+      setUpdate({ version: next.update.version, url: next.update.url });
+      setUpdateState(next.update.state);
+      setUpdateProgress(next.update.progress);
+    }
   }, []);
 
   useEffect(() => {
@@ -40,10 +46,12 @@ export function App() {
       if (event.type === 'log') setLogs(current => [...current.slice(-249), event.record]);
       if (event.type === 'login-state') setLogin(current => ({ ...current, accountId: event.accountId, state: event.state }));
       if (event.type === 'login-url') setLogin(current => ({ ...current, accountId: event.accountId, url: event.url }));
-      if (event.type === 'update-available') { setUpdate({ version: event.version, url: event.url }); setUpdateState('available'); setUpdateProgress(0); }
+      if (event.type === 'update-available' && event.version !== dismissedUpdateVersion.current) { setUpdate({ version: event.version, url: event.url }); setUpdateState('available'); setUpdateProgress(0); }
       if (event.type === 'update-progress') { setUpdateState('downloading'); setUpdateProgress(event.percent); }
       if (event.type === 'update-downloaded') { setUpdateState('ready'); setUpdateProgress(100); }
       if (event.type === 'update-state' && event.state === 'error') setUpdateState('error');
+      if (event.type === 'update-state' && event.state === 'installing') setUpdateState('installing');
+      if (event.type === 'update-state' && event.state === 'up-to-date') setUpdate(null);
     });
     return () => {
       window.clearInterval(refreshInterval);
@@ -104,7 +112,15 @@ export function App() {
         </header>
 
         <div className="content-scroll">
-          {update ? <div className="update-banner"><span><strong>CodexRouter {update.version}</strong>{updateState === 'downloading' ? `Downloading update… ${Math.round(updateProgress)}%` : updateState === 'ready' ? 'Ready to install and restart.' : updateState === 'error' ? 'Download failed. Try again.' : 'New update available.'}</span>{updateState === 'available' || updateState === 'error' ? <button onClick={() => { setUpdateState('downloading'); void api.downloadUpdate().catch(() => setUpdateState('error')); }} type="button"><Icon name="download" />Download</button> : null}{updateState === 'ready' ? <button onClick={() => { setUpdateState('installing'); void api.installUpdate(); }} type="button"><Icon name="refresh" />Install & restart</button> : null}<button onClick={() => setUpdate(null)} type="button"><Icon name="close" />Hide</button>{updateState === 'downloading' ? <div aria-label={`Download progress ${Math.round(updateProgress)}%`} className="update-progress"><i style={{ width: `${updateProgress}%` }} /></div> : null}</div> : null}
+          {update ? <div className="update-banner">
+            <span><strong>CodexRouter {update.version}</strong>{updateState === 'downloading' ? `Downloading update… ${Math.round(updateProgress)}%` : updateState === 'installing' ? 'Installing update and restarting…' : updateState === 'error' ? 'Update failed. Try again.' : 'New update available.'}</span>
+            {updateState === 'available' || updateState === 'ready' || updateState === 'error' ? <button onClick={() => {
+              setUpdateState('downloading');
+              void api.applyUpdate().catch(cause => { setUpdateState('error'); setError(messageOf(cause)); });
+            }} type="button"><Icon name="refresh" />Update & restart</button> : null}
+            <button onClick={() => { dismissedUpdateVersion.current = update.version; setUpdate(null); }} type="button"><Icon name="close" />Hide</button>
+            {updateState === 'downloading' ? <div aria-label={`Download progress ${Math.round(updateProgress)}%`} className="update-progress"><i style={{ width: `${updateProgress}%` }} /></div> : null}
+          </div> : null}
           <AnimatePresence mode="wait">
             <motion.section animate={{ opacity: 1, y: 0 }} className="surface" exit={{ opacity: 0, y: -5 }} initial={{ opacity: 0, y: 7 }} key={surface} transition={transition}>
               {surface === 'overview' ? <OverviewSurface snapshot={snapshot} logs={logs} onOpenAccount={accountId => { setSelectedAccountId(accountId); setSurface('account-detail'); }} onOpenActivity={() => setSurface('activity')} /> : null}

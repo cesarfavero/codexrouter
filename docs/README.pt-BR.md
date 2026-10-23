@@ -6,7 +6,9 @@ Um gateway local para usar vários perfis isolados do ChatGPT com o Codex, mante
 
 ## Download
 
-Baixe o app macOS na página de [GitHub Releases](https://github.com/cesarfavero/codexrouter/releases). Escolha o DMG da arquitetura do seu Mac, arraste para Applications e abra. O Codex CLI oficial precisa estar instalado separadamente.
+Baixe o app na página de [GitHub Releases](https://github.com/cesarfavero/codexrouter/releases). No macOS, escolha o DMG da arquitetura do seu Mac e arraste para Applications. No Windows, baixe o instalador x64. O Codex CLI oficial precisa estar instalado separadamente.
+
+O app instalado no Windows consulta novas versões no GitHub Releases. Quando houver uma atualização, ele mostra uma ação para baixar e reiniciar após o seu clique.
 
 ## Instalação pelo código-fonte
 

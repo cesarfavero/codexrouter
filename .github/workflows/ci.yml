@@ -29,3 +29,27 @@ jobs:
         run: npm run desktop:typecheck
       - name: Desktop renderer build
         run: npm run desktop:build
+
+  windows-package:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build Windows installer
+        run: npm run desktop:package:win
+      - name: Verify updater assets
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $installer = "release/codexrouter-$version-win-x64.exe"
+          if (-not (Test-Path $installer)) { throw "Missing Windows installer: $installer" }
+          if (-not (Test-Path "${installer}.blockmap")) { throw "Missing Windows blockmap" }
+          if (-not (Test-Path release/latest.yml)) { throw "Missing Windows update manifest" }
+          $manifest = Get-Content release/latest.yml -Raw
+          if (-not $manifest.Contains("codexrouter-$version-win-x64.exe")) { throw "Update manifest does not reference the installer" }

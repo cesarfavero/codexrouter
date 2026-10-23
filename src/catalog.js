@@ -1,8 +1,8 @@
 // Architecture adapted from miuuyy/codex-chatgpt-web (MIT). See THIRD_PARTY_NOTICES.md.
-import { fetchNativeCatalog } from './auth.js';
+import { fetchNativeCatalog, fetchNativeCatalogAsync } from './auth.js';
 import { catalogPath } from './paths.js';
 import { writeJsonAtomic } from './fs-util.js';
-import { saveRegistry } from './store.js';
+import { loadRegistry, saveRegistry } from './store.js';
 
 export const ROUTER_PREFIX = 'codexrouter/';
 export const GATEWAY_SLUG = 'codexrouter/gateway';
@@ -98,7 +98,38 @@ export function syncCatalog(registry) {
       return [];
     }
   });
+  return writeSyncedCatalog(registry, accountCatalogs);
+}
+
+export async function syncCatalogAsync(registry) {
+  if (!registry.accounts.length) throw new Error('No accounts configured.');
+  const fetched = await Promise.all(registry.accounts.map(async account => {
+    try {
+      return { account, catalog: await fetchNativeCatalogAsync(account.codexHome) };
+    } catch {
+      return null;
+    }
+  }));
+  // Authentication and account preferences may change while Codex fetches its
+  // catalog. Merge only catalog fields into the latest registry state.
+  const currentRegistry = loadRegistry();
+  const accountCatalogs = fetched.flatMap(item => {
+    if (!item) return [];
+    const currentAccount = currentRegistry.accounts.find(account =>
+      account.id === item.account.id && account.codexHome === item.account.codexHome);
+    return currentAccount ? [{ account: currentAccount, catalog: item.catalog }] : [];
+  });
+  return writeSyncedCatalog(currentRegistry, accountCatalogs);
+}
+
+function writeSyncedCatalog(registry, accountCatalogs) {
   if (!accountCatalogs.length) throw new Error('No connected account returned a usable Codex model catalog.');
+  const activeAccount = registry.accounts.find(account =>
+    account.id === registry.defaultAccountId && account.enabled !== false)
+    ?? registry.accounts.find(account => account.enabled !== false);
+  if (!activeAccount) throw new Error('No enabled account is available for the gateway catalog.');
+  const activeEntry = accountCatalogs.find(item => item.account.id === activeAccount.id);
+  if (!activeEntry) throw new Error(`The active account “${activeAccount.label}” did not return a usable Codex model catalog.`);
 
   let registryChanged = false;
   for (const { account, catalog } of accountCatalogs) {
@@ -120,7 +151,6 @@ export function syncCatalog(registry) {
   }
   if (registryChanged) saveRegistry(registry);
 
-  const activeEntry = accountCatalogs.find(item => item.account.id === registry.defaultAccountId) ?? accountCatalogs[0];
   const nativeModel = chooseNativeModel(activeEntry.catalog, activeEntry.account.preferredModel);
   const combined = buildGatewayCatalog(accountCatalogs, activeEntry.account.id);
   writeJsonAtomic(catalogPath(), combined, 0o600);

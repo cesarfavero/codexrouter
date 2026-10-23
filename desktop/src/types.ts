@@ -62,6 +62,7 @@ export type Snapshot = {
   version: string;
   platform: string;
   packaged: boolean;
+  update: { version: string; url: string; state: 'available' | 'downloading' | 'ready' | 'installing' | 'error'; progress: number } | null;
   accounts: AccountSummary[];
   defaultAccountId: string | null;
   integration: { installed: boolean; port: number; activeModel: string | null; gatewayDefault: boolean };
@@ -122,6 +123,7 @@ export type CodexRouterDesktopApi = {
   revealData(): Promise<{ ok: boolean }>;
   downloadUpdate(): Promise<{ ok: boolean }>;
   installUpdate(): Promise<{ ok: boolean }>;
+  applyUpdate(): Promise<{ ok: boolean }>;
   onEvent(callback: (event: LauncherEvent) => void): () => void;
 };
 

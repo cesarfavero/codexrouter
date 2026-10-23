@@ -30,5 +30,6 @@ contextBridge.exposeInMainWorld('codexRouter', {
   revealData: () => invoke('codexrouter:reveal-data'),
   downloadUpdate: () => invoke('codexrouter:update:download'),
   installUpdate: () => invoke('codexrouter:update:install'),
+  applyUpdate: () => invoke('codexrouter:update:apply'),
   onEvent,
 });
