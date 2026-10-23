@@ -610,6 +610,7 @@ function AddAccountModal({ login, onClose, onComplete, setError }: {
   const [label, setLabel] = useState('');
   const [authMode, setAuthMode] = useState<'local' | 'login'>('local');
   const [busy, setBusy] = useState(false);
+  const [loginUrlCopied, setLoginUrlCopied] = useState(false);
   const waiting = busy || Boolean(login?.state);
   const submit = async () => {
     if (!label.trim() || busy) return;
@@ -617,6 +618,16 @@ function AddAccountModal({ login, onClose, onComplete, setError }: {
     setError(null);
     try { await api!.addAccount(label.trim(), authMode); await onComplete(); }
     catch (cause) { setError(messageOf(cause)); setBusy(false); }
+  };
+  const copyLoginUrl = async () => {
+    if (!login?.url) return;
+    try {
+      await navigator.clipboard.writeText(login.url);
+      setLoginUrlCopied(true);
+      setError(null);
+    } catch {
+      setError('Could not copy the sign-in link. Check clipboard access and try again.');
+    }
   };
 
   return (
@@ -642,7 +653,7 @@ function AddAccountModal({ login, onClose, onComplete, setError }: {
           <h2>{login?.state === 'authenticated' ? 'Account connected' : 'Finish sign in'}</h2>
           <p>{login?.state === 'authenticated' ? 'Codex completed authentication. We are reading the account model catalog now.' : 'Codex started its local OAuth callback server. Complete the official OpenAI sign-in in your browser.'}</p>
           <div className="login-progress"><div className="spinner" /><div><strong>{loginStateLabel(login?.state)}</strong><span>You can return here after the browser confirms the login.</span></div></div>
-          {login?.url ? <PrimaryButton icon="external" onClick={() => void api!.openExternal(login.url!)}>Open sign-in page</PrimaryButton> : null}
+          {login?.url ? <div className="login-actions"><PrimaryButton icon="external" onClick={() => void api!.openExternal(login.url!)}>Open sign-in page</PrimaryButton><SecondaryButton onClick={() => void copyLoginUrl()}>{loginUrlCopied ? 'Copied' : 'Copy link'}</SecondaryButton></div> : null}
         </>}
       </motion.div>
     </motion.div>

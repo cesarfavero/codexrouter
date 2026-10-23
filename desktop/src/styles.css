@@ -236,6 +236,7 @@ code { font-family: var(--font-mono); font-size: 12px; }
 .login-progress > div:last-child { display: flex; flex-direction: column; gap: 4px; }
 .login-progress strong { font-size: 14px; font-weight: 500; }
 .login-progress span { color: var(--color-graphite); font-size: 13px; }
+.login-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .spinner { width: 20px; height: 20px; border: 2px solid var(--color-hairline); border-top-color: var(--color-obsidian); border-radius: 50%; animation: spin .75s linear infinite; }
 .spinner.small { width: 14px; height: 14px; border-width: 1.5px; }
 @keyframes spin { to { transform: rotate(360deg); } }
