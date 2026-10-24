@@ -671,6 +671,35 @@ test('gateway reports when no configured account is signed in', async () => {
   }
 });
 
+test('gateway uses its injected upstream transport and logs only a safe network cause code', async () => {
+  const state = await fixture();
+  const events = [];
+  let calls = 0;
+  const router = startRouter({
+    port: 0,
+    usageReader: async () => ({ status: 'available' }),
+    fetchImpl: async () => {
+      calls += 1;
+      throw new TypeError('fetch failed', { cause: Object.assign(new Error('secret URL and token'), { code: 'ECONNRESET' }) });
+    },
+    onRequest: event => events.push(event),
+  });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+    });
+    assert.equal(response.status, 500);
+    assert.equal(calls, 1);
+    assert.match(events[0].error, /fetch failed \(ECONNRESET\)/);
+    assert.doesNotMatch(events[0].error, /secret URL|token/);
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    state.restore();
+  }
+});
+
 test('gateway prioritizes five-hour quota when ranking healthy accounts', async () => {
   const state = await fixture();
   const upstream = http.createServer((_req, res) => {
