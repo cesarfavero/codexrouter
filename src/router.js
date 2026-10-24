@@ -326,7 +326,7 @@ async function listHealthyGatewayAccounts(active, usageReader, { force = false, 
         account,
         usage,
         score: accountHeadroomScore(usage),
-        hasHeadroom: [usage.primary?.remainingPercent, usage.secondary?.remainingPercent, usage.spendControl?.remainingPercent]
+        hasHeadroom: [usage?.primary?.remainingPercent, usage?.secondary?.remainingPercent, usage?.spendControl?.remainingPercent]
           .some(value => Number.isFinite(value)),
       });
     }
@@ -354,9 +354,9 @@ function chooseGatewayAccount(healthy, active) {
 
 function accountHeadroomScore(usage) {
   const weighted = [
-    [usage.primary?.remainingPercent, 0.7], // 5-hour capacity is the main task constraint.
-    [usage.secondary?.remainingPercent, 0.2],
-    [usage.spendControl?.remainingPercent, 0.1],
+    [usage?.primary?.remainingPercent, 0.7], // 5-hour capacity is the main task constraint.
+    [usage?.secondary?.remainingPercent, 0.2],
+    [usage?.spendControl?.remainingPercent, 0.1],
   ].filter(([value]) => Number.isFinite(value));
   if (!weighted.length) return 50;
   const totalWeight = weighted.reduce((sum, [, weight]) => sum + weight, 0);
@@ -364,18 +364,18 @@ function accountHeadroomScore(usage) {
 }
 
 function usageIsHealthy(usage) {
-  // The upstream `allowed`/`limit_reached` decision is authoritative. A
-  // secondary window may legitimately be at 0 while the account remains
-  // allowed for the current model; do not discard that account before the
-  // five-hour headroom ranking can compare it with the others.
-  return Boolean(usage)
-    && usage.status === 'available'
-    && usage.limitReached !== true;
+  // Usage telemetry can fail independently of inference. If its result is
+  // inconclusive, let the configured account attempt the request; the
+  // upstream response is authoritative and a 429 can trigger failover.
+  return !usage || (usage.status !== 'cooldown'
+    && usage.limitReached !== true
+    && usage.allowed !== false);
 }
 
 function usageNeedsFreshRead(usage) {
+  if (!usage || usage.status === 'unknown') return true;
   if (!usageIsHealthy(usage)) return true;
-  const primaryRemaining = usage.primary?.remainingPercent;
+  const primaryRemaining = usage?.primary?.remainingPercent;
   return Number.isFinite(primaryRemaining) && primaryRemaining <= FRESH_USAGE_THRESHOLD_PERCENT;
 }
 
