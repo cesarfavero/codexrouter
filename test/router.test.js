@@ -598,7 +598,8 @@ test('gateway attempts a configured account when usage telemetry is unavailable'
 test('gateway fails over after upstream 429 even when usage telemetry is unavailable', async () => {
   const state = await fixture();
   const seen = [];
-  const upstream = http.createServer((req, res) => {
+  const upstream = http.createServer(async (req, res) => {
+    for await (const _chunk of req) {}
     seen.push(req.headers['chatgpt-account-id']);
     res.writeHead(seen.length === 1 ? 429 : 200, { 'content-type': 'application/json' });
     res.end('{}');
