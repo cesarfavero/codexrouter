@@ -80,6 +80,7 @@ export function startRouter({
       routedAccount = account;
       const contentType = String(req.headers['content-type'] || '');
       let gatewayRequest = false;
+      let gatewaySlugRequest = false;
       let explicitAccountModel = false;
 
       if (raw.length && contentType.includes('application/json')) {
@@ -89,6 +90,7 @@ export function startRouter({
         const qualified = parseAccountModelSlug(parsed?.model);
         explicitAccountModel = Boolean(qualified);
         const requestedModel = parsed?.model;
+        gatewaySlugRequest = isGatewaySlug(requestedModel);
         gatewayRequest = isGatewaySlug(requestedModel) || Boolean(qualified) || typeof requestedModel === 'string';
         if (jevAdvisor?.mode !== 'off' && gatewayRequest && !isGatewaySlug(requestedModel)) {
           jevDecision = {
@@ -149,10 +151,22 @@ export function startRouter({
         upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: true, decodedRequestBody });
         attempts.push(await describeAttempt(upstream, account, 'auth-refresh'));
       }
-      if (gatewayRequest && upstream.status === 429 && !explicitAccountModel) {
-        const fallback = await selectGatewayAccount(account, usageReader, { force: true, exclude: new Set([account.id]) });
-        if (fallback && fallback.id !== account.id) {
+      if (gatewaySlugRequest) {
+        const attemptedAccountIds = new Set([account.id]);
+        while (upstream.status === 429) {
+          let fallback;
+          try {
+            fallback = await selectGatewayAccount(account, usageReader, { force: true, exclude: attemptedAccountIds });
+          } catch (error) {
+            // Keep the upstream quota response when no other configured account
+            // has confirmed capacity. The previous 429 is still useful to Codex.
+            if (error?.type === 'usage_limit_reached') break;
+            throw error;
+          }
+          if (!fallback || attemptedAccountIds.has(fallback.id)) break;
           if (!fallback.preferredModel) throw httpError(503, `The fallback account “${fallback.label}” does not have a native Codex model selected. Sync the gateway catalog first.`);
+          attemptedAccountIds.add(fallback.id);
+          await upstream.arrayBuffer();
           account = fallback;
           const fallbackRequest = JSON.parse(body.toString('utf8'));
           const fallbackRouting = jevAdvisor?.mode === 'active' && jevDecision?.status === 'ok'
@@ -366,7 +380,7 @@ function usageNeedsFreshRead(usage) {
 }
 
 function cooldownError(account, usage) {
-  const reset = usage.cooldownUntil
+  const reset = usage?.cooldownUntil
     ? new Date(usage.cooldownUntil * 1000).toISOString()
     : null;
   const suffix = reset ? ` until ${reset}` : '';
@@ -376,7 +390,7 @@ function cooldownError(account, usage) {
     : `No configured account currently has a confirmed available quota. The latest usage telemetry for “${account.label}” was inconclusive; retry the request or refresh the account session.`;
   const error = httpError(429, message);
   error.type = 'usage_limit_reached';
-  error.cooldownUntil = usage.cooldownUntil ?? null;
+  error.cooldownUntil = usage?.cooldownUntil ?? null;
   return error;
 }
 

@@ -437,6 +437,103 @@ test('gateway re-resolves Jev model policy for a fallback account after 429', as
   }
 });
 
+for (const finalStatus of [200, 429]) {
+  test(`gateway tries every eligible account after upstream 429, ending with ${finalStatus}`, async () => {
+    const state = await fixture();
+    const thirdHome = path.join(state.root, 'accounts', 'gustavo', 'codex-home');
+    fs.mkdirSync(thirdHome, { recursive: true });
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    writeJsonAtomic(path.join(thirdHome, 'auth.json'), {
+      tokens: { id_token: jwt({}), access_token: jwt({ exp }), refresh_token: 'r3', account_id: 'acct-gustavo' },
+    });
+    const registryPath = path.join(state.root, 'accounts.json');
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    registry.accounts.push({ id: 'gustavo', label: 'Gustavo', codexHome: thirdHome, preferredModel: 'gpt-6.1-sol' });
+    writeJsonAtomic(registryPath, registry);
+
+    const seen = [];
+    const events = [];
+    const upstream = http.createServer(async (req, res) => {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      seen.push({
+        account: req.headers['chatgpt-account-id'],
+        model: JSON.parse(Buffer.concat(chunks).toString('utf8')).model,
+      });
+      const status = seen.length < 3 ? 429 : finalStatus;
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ status, account: req.headers['chatgpt-account-id'] }));
+    });
+    upstream.listen(0, '127.0.0.1');
+    await once(upstream, 'listening');
+    const remaining = { eduardo: 90, cesar: 60, gustavo: 30 };
+    const router = startRouter({
+      port: 0,
+      upstreamBase: `http://127.0.0.1:${upstream.address().port}`,
+      usageReader: async account => ({ status: 'available', primary: { remainingPercent: remaining[account.id] } }),
+      onRequest: event => events.push(event),
+    });
+    await once(router, 'listening');
+    try {
+      const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+      });
+      assert.equal(response.status, finalStatus);
+      assert.deepEqual(await response.json(), { status: finalStatus, account: 'acct-gustavo' });
+      assert.deepEqual(seen, [
+        { account: 'acct-eduardo', model: 'gpt-5.5' },
+        { account: 'acct-cesar', model: 'gpt-5.6-sol' },
+        { account: 'acct-gustavo', model: 'gpt-6.1-sol' },
+      ]);
+      assert.deepEqual(events[0].attempts.map(attempt => [attempt.accountId, attempt.reason, attempt.status]), [
+        ['eduardo', 'initial', 429],
+        ['cesar', 'account-failover', 429],
+        ['gustavo', 'account-failover', finalStatus],
+      ]);
+    } finally {
+      await new Promise(resolve => router.close(resolve));
+      await new Promise(resolve => upstream.close(resolve));
+      state.restore();
+    }
+  });
+}
+
+test('explicit native model stays pinned after upstream 429', async () => {
+  const state = await fixture();
+  const seen = [];
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    seen.push(JSON.parse(Buffer.concat(chunks).toString('utf8')).model);
+    res.writeHead(429, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: { message: 'quota' } }));
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({
+    port: 0,
+    upstreamBase: `http://127.0.0.1:${upstream.address().port}`,
+    usageReader: async () => ({ status: 'available' }),
+  });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-6-astra', input: [] }),
+    });
+    assert.equal(response.status, 429);
+    await response.text();
+    assert.deepEqual(seen, ['gpt-6-astra']);
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+    state.restore();
+  }
+});
+
 test('gateway refreshes stale cooldown telemetry before rejecting a usable account', async () => {
   const state = await fixture();
   let upstreamCalls = 0;
@@ -466,6 +563,23 @@ test('gateway refreshes stale cooldown telemetry before rejecting a usable accou
   } finally {
     await new Promise(resolve => router.close(resolve));
     await new Promise(resolve => upstream.close(resolve));
+    state.restore();
+  }
+});
+
+test('gateway reports inconclusive usage without a server exception', async () => {
+  const state = await fixture();
+  const router = startRouter({ port: 0, usageReader: async () => null });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+    });
+    assert.equal(response.status, 429);
+    assert.equal((await response.json()).error.type, 'usage_limit_reached');
+  } finally {
+    await new Promise(resolve => router.close(resolve));
     state.restore();
   }
 });
