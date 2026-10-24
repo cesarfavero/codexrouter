@@ -12,6 +12,7 @@ CodexRouter presents one managed `Router` model in the native Codex picker. The 
 - For a managed Router request, retry each eligible configured account at most once after an upstream `429`; preserve explicit native and account-qualified model selections.
 - Treat unavailable usage telemetry as inconclusive, not as exhausted quota. Try configured accounts and let the upstream response decide; still exclude accounts with explicit cooldown or `allowed: false`.
 - Route only through account profiles with a readable isolated Codex `auth.json`. Re-authentication must keep `cli_auth_credentials_store = "file"`; report a missing login clearly and never fall back to the main Codex login.
+- Preserve the caller's `Authorization` and `chatgpt-account-id` on non-model passthrough routes. Never replace those credentials with the main Codex login, and never supply main-login credentials when the caller sent none; this keeps account-scoped data and notifications isolated.
 - If the Codex desktop composer is disabled by its signed-in account's usage limit, confirm whether a new Router Activity request exists before diagnosing gateway failover. A request blocked in the client cannot be rerouted by the gateway.
 - Do not aggregate multiple subscriptions into a single effective quota pool.
 - Discover selectable native models from each account's current Codex CLI catalog; do not maintain version-specific model lists. Preserve valid user-selected models, and base automatic selection only on models reported by that account.
