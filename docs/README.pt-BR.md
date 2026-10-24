@@ -23,6 +23,8 @@ npm run desktop:dev
 
 Na primeira execução, adicione suas contas, conclua o login oficial no navegador, atualize o catálogo, escolha o modelo nativo e o effort em **Settings**, e então clique em **Install & start**.
 
+Se um modelo novo não aparecer no Windows, abra **Gateway** para conferir os modelos e o resultado da última atualização do catálogo. Use **Refresh gateway** após atualizar o Codex CLI oficial. Para que o catálogo apareça no seletor do Codex, a integração em **Setup** precisa estar instalada; reinicie o Codex depois de instalá-la. Os modelos disponíveis podem variar conforme a conta ativa.
+
 ## Como funciona
 
 Cada conta usa um `CODEX_HOME` isolado. O gateway consulta o uso e troca automaticamente para outra conta configurada quando a conta ativa atinge o limite ou fica com pouco uso restante. As assinaturas não são combinadas em uma única cota.

@@ -99,6 +99,11 @@ code { font-family: var(--font-mono); font-size: 12px; }
 .section-divider { height: 1px; background: var(--color-hairline); margin: 40px 0 20px; }
 .compact-actions { display: flex; align-items: center; gap: 16px; }
 .compact-actions p { margin: 0; color: var(--color-graphite); font-size: 14px; line-height: 1.5; }
+.catalog-notice { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--color-warning); border-radius: 10px; color: var(--color-obsidian); font-size: 13px; line-height: 1.5; }
+.catalog-notice button { border: 0; background: transparent; color: var(--color-accent); cursor: pointer; font: inherit; font-weight: 600; text-decoration: underline; }
+.catalog-diagnostics { display: grid; gap: 5px; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--color-hairline); border-radius: 10px; font-size: 13px; }
+.catalog-diagnostics span { color: var(--color-graphite); overflow-wrap: anywhere; }
+.catalog-diagnostics small { color: var(--color-graphite); font-size: 12px; overflow-wrap: anywhere; }
 
 .setup-list, .settings-list { border-top: 1px solid var(--color-hairline); }
 .setup-step { min-height: 78px; display: grid; grid-template-columns: 32px 1fr auto; align-items: center; gap: 16px; border-bottom: 1px solid var(--color-hairline); }

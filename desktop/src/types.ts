@@ -64,6 +64,7 @@ export type Snapshot = {
   packaged: boolean;
   update: { version: string; url: string; state: 'available' | 'downloading' | 'ready' | 'installing' | 'error'; progress: number } | null;
   accounts: AccountSummary[];
+  catalogRefresh: { status: 'idle' | 'refreshing' | 'ready' | 'error'; lastSuccessAt: string | null; error: string | null };
   defaultAccountId: string | null;
   integration: { installed: boolean; port: number; activeModel: string | null; gatewayDefault: boolean };
   runtime: { running: boolean; port: number };

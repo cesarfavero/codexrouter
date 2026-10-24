@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { codexBinary, extractLoginAuthUrl, reuseMainCodexSession } from '../src/auth.js';
+import { codexBinary, extractLoginAuthUrl, fetchNativeCatalog, fetchNativeCatalogAsync, probeCodexCli, reuseMainCodexSession } from '../src/auth.js';
 
 function jwt(payload) {
   return `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.sig`;
@@ -16,6 +16,35 @@ test('codexBinary honors an explicit executable path', () => {
     assert.equal(codexBinary(), '/custom/path/codex');
   } finally {
     if (previous === undefined) delete process.env.CODEX_BIN; else process.env.CODEX_BIN = previous;
+  }
+});
+
+test('Windows Codex .cmd shim runs from a path with spaces for sync and async catalog refresh', { skip: process.platform !== 'win32' }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codexrouter-cmd-'));
+  const previous = process.env.CODEX_BIN;
+  try {
+    const directory = path.join(root, 'codex shim test');
+    fs.mkdirSync(directory);
+    const binary = path.join(directory, 'codex.cmd');
+    fs.writeFileSync(binary, [
+      '@echo off',
+      'if "%~1"=="--version" (echo codex-cli 0.163.0 & exit /b 0)',
+      'if not "%~1"=="debug" exit /b 2',
+      'if not "%~2"=="models" exit /b 3',
+      'echo {"models":[{"slug":"gpt-6.1-sol","visibility":"list"}]}',
+      '',
+    ].join('\r\n'));
+    process.env.CODEX_BIN = binary;
+    const home = path.join(root, 'account home');
+
+    const sync = fetchNativeCatalog(home);
+    const asyncCatalog = await fetchNativeCatalogAsync(home);
+    assert.deepEqual(sync, asyncCatalog);
+    assert.equal(sync.models[0].slug, 'gpt-6.1-sol');
+    assert.deepEqual(await probeCodexCli(), { available: true, version: '0.163.0' });
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_BIN; else process.env.CODEX_BIN = previous;
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

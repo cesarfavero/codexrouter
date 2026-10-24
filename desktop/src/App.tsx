@@ -124,7 +124,7 @@ export function App() {
           <AnimatePresence mode="wait">
             <motion.section animate={{ opacity: 1, y: 0 }} className="surface" exit={{ opacity: 0, y: -5 }} initial={{ opacity: 0, y: 7 }} key={surface} transition={transition}>
               {surface === 'overview' ? <OverviewSurface snapshot={snapshot} logs={logs} onOpenAccount={accountId => { setSelectedAccountId(accountId); setSurface('account-detail'); }} onOpenActivity={() => setSurface('activity')} /> : null}
-              {surface === 'accounts' ? <AccountsSurface snapshot={snapshot} onAdd={() => setAddOpen(true)} onRefresh={refresh} setError={setError} setLogin={setLogin} onOpenAccount={accountId => { setSelectedAccountId(accountId); setSurface('account-detail'); }} /> : null}
+              {surface === 'accounts' ? <AccountsSurface snapshot={snapshot} onAdd={() => setAddOpen(true)} onRefresh={refresh} setError={setError} setLogin={setLogin} onOpenSetup={() => setSurface('setup')} onOpenAccount={accountId => { setSelectedAccountId(accountId); setSurface('account-detail'); }} /> : null}
               {surface === 'setup' ? <SetupSurface snapshot={snapshot} onRefresh={refresh} setError={setError} /> : null}
               {surface === 'activity' ? <ActivitySurface logs={logs} snapshot={snapshot} /> : null}
               {surface === 'account-detail' ? <AccountDetailSurface account={snapshot.accounts.find(item => item.id === selectedAccountId) ?? activeAccount} logs={logs} onBack={() => setSurface('overview')} /> : null}
@@ -142,14 +142,16 @@ export function App() {
   );
 }
 
-function AccountsSurface({ snapshot, onAdd, onRefresh, setError, setLogin, onOpenAccount }: {
+function AccountsSurface({ snapshot, onAdd, onRefresh, setError, setLogin, onOpenSetup, onOpenAccount }: {
   snapshot: Snapshot;
   onAdd: () => void;
   onRefresh: () => Promise<void>;
   setError: (message: string | null) => void;
   setLogin: (value: { accountId?: string; state?: string; url?: string } | null) => void;
+  onOpenSetup: () => void;
   onOpenAccount: (accountId: string) => void;
 }) {
+  const activeAccount = snapshot.accounts.find(account => account.isActive);
   return (
     <>
       <SurfaceHeader
@@ -183,6 +185,14 @@ function AccountsSurface({ snapshot, onAdd, onRefresh, setError, setLogin, onOpe
           ))}
         </div>
       )}
+
+      {!snapshot.codex.available ? <div className="catalog-notice" role="status">Codex CLI was not found. Install or update the official CLI on this computer, then refresh the gateway.</div> : null}
+      {!snapshot.integration.installed ? <div className="catalog-notice" role="status">Codex integration is off. The Codex model picker will not read this Router catalog until you install the integration and restart Codex. <button onClick={onOpenSetup} type="button">Open setup</button></div> : null}
+      {activeAccount ? <div className="catalog-diagnostics">
+        <strong>Models for {activeAccount.label}</strong>
+        <span>{activeAccount.availableModels.map(model => model.slug).join(' · ') || 'No models discovered yet'}</span>
+        <small>{snapshot.catalogRefresh.status === 'refreshing' ? 'Refreshing from Codex CLI…' : snapshot.catalogRefresh.error ? `Catalog refresh failed: ${snapshot.catalogRefresh.error}` : snapshot.catalogRefresh.lastSuccessAt ? `Last refreshed ${new Date(snapshot.catalogRefresh.lastSuccessAt).toLocaleString()}` : 'Waiting for the first catalog refresh'}</small>
+      </div> : null}
 
       <div className="section-divider" />
       <div className="compact-actions">
