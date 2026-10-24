@@ -187,6 +187,46 @@ test('router emits usage telemetry without creating a false 500 after a successf
   }
 });
 
+test('router records an upstream response before a long-lived SSE stream ends', async () => {
+  const state = await fixture();
+  const events = [];
+  const upstream = http.createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write('event: response.output_text.delta\ndata: {"delta":"OK"}\n\n');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({
+    port: 0,
+    upstreamBase: `http://127.0.0.1:${upstream.address().port}`,
+    usageReader: async () => ({ status: 'available' }),
+    onRequest: event => events.push(event),
+  });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+    });
+    assert.equal(response.status, 200);
+    const reader = response.body.getReader();
+    await reader.read();
+    assert.equal(events.length, 1);
+    assert.equal(events[0].status, 200);
+    assert.equal(events[0].model, 'gpt-5.5');
+    await reader.cancel();
+  } finally {
+    router.closeAllConnections();
+    upstream.closeAllConnections();
+    await Promise.all([
+      new Promise(resolve => router.close(resolve)),
+      new Promise(resolve => upstream.close(resolve)),
+    ]);
+    state.restore();
+  }
+});
+
 test('gateway decodes Codex zstd requests and forwards rewritten JSON without content-encoding', async () => {
   const state = await fixture();
   let seen = null;

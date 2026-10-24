@@ -294,14 +294,14 @@ function uniqueRequestLogs(logs: LogRecord[]) {
   const byRequest = new Map<string, LogRecord>();
   for (const log of logs) {
     const details = log.details as { requestId?: string } | undefined;
-    if (!details?.requestId) continue;
+    if (!details?.requestId || (details as { transport?: string }).transport === 'websocket-negotiation') continue;
     const current = byRequest.get(details.requestId);
     if (!current) byRequest.set(details.requestId, log);
     else if (Boolean((details as { usageOnly?: boolean }).usageOnly)) {
-      // The usage event arrives after the response event. Merge it so token
-      // telemetry cannot replace the request metadata or vice versa.
+      // The usage event arrives after the response event. Keep its request
+      // metadata while adding token telemetry.
       byRequest.set(details.requestId, { ...current, details: { ...(current.details as object), ...details } });
-    }
+    } else byRequest.set(details.requestId, log);
   }
   return [...byRequest.values()];
 }
@@ -362,6 +362,7 @@ function SetupStep({ index, done, title, body }: { index: number; done: boolean;
 function ActivitySurface({ logs, snapshot }: { logs: LogRecord[]; snapshot: Snapshot }) {
   const active = snapshot.accounts.find(account => account.isActive);
   const requests = uniqueRequestLogs(logs);
+  const negotiations = logs.filter(log => (log.details as { transport?: string } | undefined)?.transport === 'websocket-negotiation').length;
   const failures = requests.filter(log => Number((log.details as { status?: number }).status) >= 400).length;
   const tokens = requests.reduce((sum, log) => sum + Number((log.details as { usage?: { totalTokens?: number } }).usage?.totalTokens || 0), 0);
   return (
@@ -376,7 +377,7 @@ function ActivitySurface({ logs, snapshot }: { logs: LogRecord[]; snapshot: Snap
         <Metric icon="refresh" label="Usage" value={active?.usage?.primary?.remainingPercent == null ? 'Unknown' : `${Math.round(active.usage.primary.remainingPercent)}% left`} />
       </div>
       <div className="log-view">
-        <div className="log-head"><span>Recent events</span><span>{logs.length} events · {requests.length} requests</span></div>
+        <div className="log-head"><span>Recent events</span><span>{logs.length} events · {requests.length} requests · {negotiations} WebSocket negotiations</span></div>
         {logs.length ? [...logs].reverse().map(log => <div className="log-row" key={log.id}><span className={`log-dot ${log.level}`} /><time>{new Date(log.at).toLocaleTimeString()}</time><span>{log.message}</span></div>) : <div className="log-empty">No runtime events yet.</div>}
       </div>
     </>

@@ -16,6 +16,7 @@ CodexRouter presents one managed `Router` model in the native Codex picker. The 
 - Do not aggregate multiple subscriptions into a single effective quota pool.
 - Discover selectable native models from each account's current Codex CLI catalog; do not maintain version-specific model lists. Preserve valid user-selected models, and base automatic selection only on models reported by that account.
 - Return `426 Upgrade Required` for `/v1/responses` capability negotiation and WebSocket upgrades so Codex falls back to HTTP/SSE. This keeps resumed conversations and Goals on the account-aware routing path, where the gateway slug is replaced with the selected account's native model.
+- Treat that `426` as a transport fallback in Activity, not a model request or account error. Record the upstream response as soon as its headers arrive so long-lived SSE streams remain visible even before the body ends.
 
 ## Non-goals
 
