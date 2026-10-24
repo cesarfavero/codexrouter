@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { codexBinary, extractLoginAuthUrl, fetchNativeCatalog, fetchNativeCatalogAsync, probeCodexCli, reuseMainCodexSession } from '../src/auth.js';
+import { codexBinary, extractLoginAuthUrl, fetchNativeCatalog, fetchNativeCatalogAsync, prepareAccountCodexHome, probeCodexCli, reuseMainCodexSession } from '../src/auth.js';
 
 function jwt(payload) {
   return `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.sig`;
@@ -16,6 +16,18 @@ test('codexBinary honors an explicit executable path', () => {
     assert.equal(codexBinary(), '/custom/path/codex');
   } finally {
     if (previous === undefined) delete process.env.CODEX_BIN; else process.env.CODEX_BIN = previous;
+  }
+});
+
+test('isolated account login stores credentials in the file required by the Router', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codexrouter-auth-store-'));
+  try {
+    const configPath = path.join(root, 'config.toml');
+    fs.writeFileSync(configPath, 'cli_auth_credentials_store = "keyring"\nmodel = "gpt-6-luna"\n');
+    prepareAccountCodexHome(root);
+    assert.equal(fs.readFileSync(configPath, 'utf8'), 'cli_auth_credentials_store = "file"\nmodel = "gpt-6-luna"\n');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

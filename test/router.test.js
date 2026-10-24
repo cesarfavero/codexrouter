@@ -622,6 +622,55 @@ test('gateway fails over after upstream 429 even when usage telemetry is unavail
   }
 });
 
+test('gateway skips a disconnected default account and routes through a signed-in account', async () => {
+  const state = await fixture();
+  fs.rmSync(path.join(state.root, 'accounts', 'eduardo', 'codex-home', 'auth.json'));
+  const seen = [];
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    seen.push({ account: req.headers['chatgpt-account-id'], model: JSON.parse(Buffer.concat(chunks).toString()).model });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{}');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({ port: 0, upstreamBase: `http://127.0.0.1:${upstream.address().port}`, usageReader: async () => null });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(seen, [{ account: 'acct-cesar', model: 'gpt-5.6-sol' }]);
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+    state.restore();
+  }
+});
+
+test('gateway reports when no configured account is signed in', async () => {
+  const state = await fixture();
+  for (const id of ['eduardo', 'cesar']) fs.rmSync(path.join(state.root, 'accounts', id, 'codex-home', 'auth.json'));
+  const router = startRouter({ port: 0, usageReader: async () => null });
+  await once(router, 'listening');
+  try {
+    for (const model of ['codexrouter/gateway', 'codexrouter/eduardo/gpt-5.5']) {
+      const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model, input: [] }),
+      });
+      assert.equal(response.status, 503);
+      assert.match((await response.json()).error.message, /Re-authenticate/);
+    }
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    state.restore();
+  }
+});
+
 test('gateway prioritizes five-hour quota when ranking healthy accounts', async () => {
   const state = await fixture();
   const upstream = http.createServer((_req, res) => {
