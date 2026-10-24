@@ -567,19 +567,57 @@ test('gateway refreshes stale cooldown telemetry before rejecting a usable accou
   }
 });
 
-test('gateway reports inconclusive usage without a server exception', async () => {
+test('gateway attempts a configured account when usage telemetry is unavailable', async () => {
   const state = await fixture();
-  const router = startRouter({ port: 0, usageReader: async () => null });
+  const seen = [];
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    seen.push({ account: req.headers['chatgpt-account-id'], model: JSON.parse(Buffer.concat(chunks).toString()).model });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{}');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({ port: 0, upstreamBase: `http://127.0.0.1:${upstream.address().port}`, usageReader: async () => null });
   await once(router, 'listening');
   try {
     const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
     });
-    assert.equal(response.status, 429);
-    assert.equal((await response.json()).error.type, 'usage_limit_reached');
+    assert.equal(response.status, 200);
+    assert.deepEqual(seen, [{ account: 'acct-eduardo', model: 'gpt-5.5' }]);
   } finally {
     await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+    state.restore();
+  }
+});
+
+test('gateway fails over after upstream 429 even when usage telemetry is unavailable', async () => {
+  const state = await fixture();
+  const seen = [];
+  const upstream = http.createServer(async (req, res) => {
+    for await (const _chunk of req) {}
+    seen.push(req.headers['chatgpt-account-id']);
+    res.writeHead(seen.length === 1 ? 429 : 200, { 'content-type': 'application/json' });
+    res.end('{}');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const router = startRouter({ port: 0, upstreamBase: `http://127.0.0.1:${upstream.address().port}`, usageReader: async () => null });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(seen, ['acct-eduardo', 'acct-cesar']);
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
     state.restore();
   }
 });
