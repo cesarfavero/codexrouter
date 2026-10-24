@@ -40,6 +40,8 @@ Windows auto-updates require each GitHub release to include the NSIS `.exe`, its
 
 On Windows, Codex CLI may be an npm `.cmd` shim in a path with spaces. Use the shared launcher for model refresh and version detection, and run the shim test on a Windows CI runner. Surface catalog refresh errors in the desktop UI so stale models are distinguishable from unavailable account models.
 
+Desktop upstream requests use an isolated in-memory Electron session so the Windows system proxy is honored without sharing browser cookies. Keep the CLI/test Router transport injectable, and log only safe network error codes rather than underlying URLs, headers or cause messages.
+
 ## Jev semantic routing
 
 - Treat Jev as a typed semantic advisor, not as authority over authentication, account eligibility, quota/cooldown, permissions, dates, exact calculations or irreversible actions.

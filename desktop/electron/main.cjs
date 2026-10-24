@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, safeStorage, session } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -426,6 +426,7 @@ async function startRuntime(preferredPort) {
     port: routerPort,
     jevAdvisor,
     onRequest: recordRouterRequest,
+    fetchImpl: process.platform === 'win32' ? desktopUpstreamFetch : fetch,
   });
   try {
     await waitForServer(server);
@@ -440,6 +441,7 @@ async function startRuntime(preferredPort) {
       port: routerPort,
       jevAdvisor,
       onRequest: recordRouterRequest,
+      fetchImpl: process.platform === 'win32' ? desktopUpstreamFetch : fetch,
     });
     await waitForServer(server);
   }
@@ -453,6 +455,17 @@ async function startRuntime(preferredPort) {
   record('info', `Router listening on 127.0.0.1:${routerPort}.`);
   sendEvent({ type: 'snapshot-invalidated' });
   return snapshot();
+}
+
+function desktopUpstreamFetch(input, init) {
+  // An isolated in-memory Chromium session honors the Windows system proxy
+  // without sharing browser cookies with authenticated account requests.
+  const upstreamSession = session.fromPartition('codexrouter-upstream', { cache: false });
+  return upstreamSession.fetch(input, {
+    ...init,
+    credentials: 'omit',
+    bypassCustomProtocolHandlers: true,
+  });
 }
 
 function waitForServer(server) {

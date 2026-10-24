@@ -24,6 +24,7 @@ export function startRouter({
   host = '127.0.0.1',
   upstreamBase = process.env.CODEXROUTER_UPSTREAM_BASE || 'https://chatgpt.com/backend-api/codex',
   officialUpstreamBase = process.env.CODEXROUTER_OFFICIAL_UPSTREAM_BASE || upstreamBase,
+  fetchImpl = fetch,
   usageReader = getAccountUsage,
   jevAdvisor = createJevAdvisor(),
   onRequest = null,
@@ -67,7 +68,7 @@ export function startRouter({
 
       const endpoint = routeEndpoint(req.method, req.url);
       if (!endpoint) {
-        const upstream = await forwardOfficial({ req, body: await readBody(req), officialBase: officialUpstreamBase, forceRefresh: false });
+        const upstream = await forwardOfficial({ req, body: await readBody(req), officialBase: officialUpstreamBase, forceRefresh: false, fetchImpl });
         await writeResponse(res, upstream);
         await emitRequest(onRequest, { requestId, account: null, endpoint: req.url?.split('?')[0] || null, model: null, status: upstream.status, transport: 'official-http', method: req.method || null, durationMs: Date.now() - startedAt, attempts: [] });
         return;
@@ -145,11 +146,11 @@ export function startRouter({
         }
       }
 
-      let upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: false, decodedRequestBody });
+      let upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: false, decodedRequestBody, fetchImpl });
       attempts.push(await describeAttempt(upstream, account, 'initial'));
       if (upstream.status === 401) {
         await upstream.arrayBuffer();
-        upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: true, decodedRequestBody });
+        upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: true, decodedRequestBody, fetchImpl });
         attempts.push(await describeAttempt(upstream, account, 'auth-refresh'));
       }
       if (gatewaySlugRequest) {
@@ -177,7 +178,7 @@ export function startRouter({
             ? fallbackRouting.recommendedModel
             : account.preferredModel;
           body = Buffer.from(JSON.stringify({ ...fallbackRequest, model: fallbackModel || account.preferredModel }));
-          upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: false, decodedRequestBody });
+          upstream = await forward({ req, body, account, endpoint, upstreamBase, forceRefresh: false, decodedRequestBody, fetchImpl });
           attempts.push(await describeAttempt(upstream, account, 'account-failover'));
         }
       }
@@ -191,7 +192,7 @@ export function startRouter({
       if (usage) void emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http-usage', durationMs: Date.now() - startedAt, attempts, usage, usageOnly: true, jev });
     } catch (error) {
       const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
-      await emitRequest(onRequest, { requestId, account: routedAccount, endpoint: req.url?.split('?')[0] || null, model: routedModel, status, transport: 'http', durationMs: Date.now() - startedAt, attempts, error: sanitizeLogText(error?.message || String(error)), jev: summarizeJevDecision(jevDecision, jevRouting, jevAccountRouting) });
+      await emitRequest(onRequest, { requestId, account: routedAccount, endpoint: req.url?.split('?')[0] || null, model: routedModel, status, transport: 'http', durationMs: Date.now() - startedAt, attempts, error: safeErrorSummary(error), jev: summarizeJevDecision(jevDecision, jevRouting, jevAccountRouting) });
       res.writeHead(status, { 'content-type': 'application/json' });
       res.end(JSON.stringify({
         error: {
@@ -275,6 +276,14 @@ function sanitizeLogText(value) {
     .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[REDACTED_JWT]')
     .replace(/[\r\n]+/g, ' ')
     .trim();
+}
+
+function safeErrorSummary(error) {
+  const summary = sanitizeLogText(error?.message || String(error));
+  const code = error?.cause?.code ?? error?.code;
+  return typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,50}$/.test(code)
+    ? `${summary} (${code})`
+    : summary;
 }
 
 function routeEndpoint(method, url = '') {
@@ -414,7 +423,7 @@ function httpError(statusCode, message) {
   return error;
 }
 
-async function forward({ req, body, account, endpoint, upstreamBase, forceRefresh, decodedRequestBody = false }) {
+async function forward({ req, body, account, endpoint, upstreamBase, forceRefresh, decodedRequestBody = false, fetchImpl }) {
   const auth = freshAuth(account.codexHome, { force: forceRefresh });
   const headers = new Headers();
   for (const [name, value] of Object.entries(req.headers)) {
@@ -427,10 +436,10 @@ async function forward({ req, body, account, endpoint, upstreamBase, forceRefres
   headers.set('authorization', `Bearer ${auth.accessToken}`);
   if (auth.accountId) headers.set('chatgpt-account-id', auth.accountId);
   const upstream = `${upstreamBase.replace(/\/$/, '')}/${endpoint}`;
-  return fetch(upstream, { method: 'POST', headers, body });
+  return fetchImpl(upstream, { method: 'POST', headers, body });
 }
 
-async function forwardOfficial({ req, body, officialBase, forceRefresh }) {
+async function forwardOfficial({ req, body, officialBase, forceRefresh, fetchImpl }) {
   const auth = await officialAuth({ force: forceRefresh, incomingAuthorization: req.headers.authorization });
   const headers = new Headers();
   for (const [name, value] of Object.entries(req.headers)) {
@@ -442,7 +451,7 @@ async function forwardOfficial({ req, body, officialBase, forceRefresh }) {
   if (auth?.accessToken) headers.set('authorization', `Bearer ${auth.accessToken}`);
   if (auth?.accountId) headers.set('chatgpt-account-id', auth.accountId);
   const target = officialTarget(officialBase, req.url || '/');
-  return fetch(target, { method: req.method, headers, body: body?.length ? body : undefined });
+  return fetchImpl(target, { method: req.method, headers, body: body?.length ? body : undefined });
 }
 
 async function officialAuth({ force = false, incomingAuthorization }) {
