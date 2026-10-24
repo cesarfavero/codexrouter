@@ -380,7 +380,7 @@ function usageNeedsFreshRead(usage) {
 }
 
 function cooldownError(account, usage) {
-  const reset = usage.cooldownUntil
+  const reset = usage?.cooldownUntil
     ? new Date(usage.cooldownUntil * 1000).toISOString()
     : null;
   const suffix = reset ? ` until ${reset}` : '';
@@ -390,7 +390,7 @@ function cooldownError(account, usage) {
     : `No configured account currently has a confirmed available quota. The latest usage telemetry for “${account.label}” was inconclusive; retry the request or refresh the account session.`;
   const error = httpError(429, message);
   error.type = 'usage_limit_reached';
-  error.cooldownUntil = usage.cooldownUntil ?? null;
+  error.cooldownUntil = usage?.cooldownUntil ?? null;
   return error;
 }
 

@@ -567,6 +567,23 @@ test('gateway refreshes stale cooldown telemetry before rejecting a usable accou
   }
 });
 
+test('gateway reports inconclusive usage without a server exception', async () => {
+  const state = await fixture();
+  const router = startRouter({ port: 0, usageReader: async () => null });
+  await once(router, 'listening');
+  try {
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/responses`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'codexrouter/gateway', input: [] }),
+    });
+    assert.equal(response.status, 429);
+    assert.equal((await response.json()).error.type, 'usage_limit_reached');
+  } finally {
+    await new Promise(resolve => router.close(resolve));
+    state.restore();
+  }
+});
+
 test('gateway prioritizes five-hour quota when ranking healthy accounts', async () => {
   const state = await fixture();
   const upstream = http.createServer((_req, res) => {
