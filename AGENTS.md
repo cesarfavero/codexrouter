@@ -34,6 +34,8 @@ For repository work, create/link an Issue, use a branch, make focused commits, o
 
 Windows auto-updates require each GitHub release to include the NSIS `.exe`, its `.blockmap`, and the matching `latest.yml` from the same build. Keep the update action user-initiated and verify those assets after publishing.
 
+On Windows, Codex CLI may be an npm `.cmd` shim in a path with spaces. Use the shared launcher for model refresh and version detection, and run the shim test on a Windows CI runner. Surface catalog refresh errors in the desktop UI so stale models are distinguishable from unavailable account models.
+
 ## Jev semantic routing
 
 - Treat Jev as a typed semantic advisor, not as authority over authentication, account eligibility, quota/cooldown, permissions, dates, exact calculations or irreversible actions.

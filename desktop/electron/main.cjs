@@ -28,6 +28,7 @@ let updateTimer = null;
 let catalogRefreshTimer = null;
 let backgroundCatalogRefresh = null;
 let catalogSyncQueue = Promise.resolve();
+let catalogRefreshState = { status: 'idle', lastSuccessAt: null, error: null };
 let updateInfo = null;
 let updateStatus = null;
 let updateProgress = 0;
@@ -369,7 +370,7 @@ async function snapshot() {
   }));
 
   const installed = integration.integrationStatus();
-  const codexProbe = spawnSync(auth.codexBinary(), ['--version'], { encoding: 'utf8', timeout: 5000 });
+  const codexProbe = await auth.probeCodexCli();
   return {
     version: app.getVersion(),
     platform: process.platform,
@@ -381,6 +382,7 @@ async function snapshot() {
       progress: updateProgress,
     } : null,
     accounts,
+    catalogRefresh: catalogRefreshState,
     defaultAccountId: registry.defaultAccountId,
     integration: {
       installed: installed.installed,
@@ -392,8 +394,8 @@ async function snapshot() {
     autostart: getAutostart(app),
     jev: desktopJevSummary(jev),
     codex: {
-      available: !codexProbe.error && codexProbe.status === 0,
-      version: codexProbe.status === 0 ? String(codexProbe.stdout || codexProbe.stderr || '').trim() : null,
+      available: codexProbe.available,
+      version: codexProbe.version,
     },
     gateway: {
       slug: catalog.GATEWAY_SLUG,
@@ -503,7 +505,18 @@ async function stopRuntime({ restoreIntegration = true } = {}) {
 function synchronizeCatalog() {
   const pending = catalogSyncQueue.then(async () => {
     const { store, catalog } = await core();
-    return catalog.syncCatalogAsync(store.loadRegistry());
+    catalogRefreshState = { ...catalogRefreshState, status: 'refreshing', error: null };
+    sendEvent({ type: 'snapshot-invalidated' });
+    try {
+      const result = await catalog.syncCatalogAsync(store.loadRegistry());
+      catalogRefreshState = { status: 'ready', lastSuccessAt: new Date().toISOString(), error: null };
+      return result;
+    } catch (error) {
+      catalogRefreshState = { ...catalogRefreshState, status: 'error', error: error?.message || String(error) };
+      throw error;
+    } finally {
+      sendEvent({ type: 'snapshot-invalidated' });
+    }
   });
   catalogSyncQueue = pending.catch(() => {});
   return pending;
@@ -525,7 +538,6 @@ async function syncCatalogBestEffort() {
 function refreshCatalogInBackground() {
   if (backgroundCatalogRefresh) return backgroundCatalogRefresh;
   backgroundCatalogRefresh = syncCatalogBestEffort()
-    .then(result => { if (result) sendEvent({ type: 'snapshot-invalidated' }); })
     .finally(() => { backgroundCatalogRefresh = null; });
   return backgroundCatalogRefresh;
 }
