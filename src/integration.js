@@ -1,4 +1,3 @@
-// Architecture adapted from miuuyy/codex-chatgpt-web (MIT). See THIRD_PARTY_NOTICES.md.
 import fs from 'node:fs';
 import path from 'node:path';
 import { catalogPath, integrationJournalPath, mainCodexConfigPath } from './paths.js';

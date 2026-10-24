@@ -1,5 +1,3 @@
-// UI structure and interaction language adapted from the MIT-licensed
-// miuuyy/codex-chatgpt-web launcher. Product flows are CodexRouter-specific.
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon, type IconName } from './icons';
@@ -391,6 +389,8 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
   const [model, setModel] = useState(active?.preferredModel ?? '');
   const [effort, setEffort] = useState(active?.preferredEffort ?? 'medium');
   const [saving, setSaving] = useState(false);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [applyingUpdate, setApplyingUpdate] = useState(false);
 
   useEffect(() => {
     setModel(active?.preferredModel ?? '');
@@ -404,6 +404,39 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
     catch (cause) { setError(messageOf(cause)); }
     finally { setSaving(false); }
   };
+
+  const checkUpdates = async () => {
+    if (checkingUpdates || !snapshot.updateCheck.supported) return;
+    setCheckingUpdates(true);
+    try { await api!.checkUpdate(); await onRefresh(); }
+    catch (cause) { setError(messageOf(cause)); await onRefresh(); }
+    finally { setCheckingUpdates(false); }
+  };
+
+  const applyAvailableUpdate = async () => {
+    if (!snapshot.update || applyingUpdate) return;
+    setApplyingUpdate(true);
+    try { await api!.applyUpdate(); }
+    catch (cause) { setError(messageOf(cause)); await onRefresh(); setApplyingUpdate(false); }
+  };
+
+  const updateStatus = snapshot.update?.state === 'downloading'
+    ? `Downloading ${Math.round(snapshot.update.progress)}%`
+    : snapshot.update?.state === 'installing'
+      ? 'Installing and restarting…'
+      : snapshot.update?.state === 'ready'
+        ? `Version ${snapshot.update.version} ready to install`
+        : snapshot.update?.state === 'error'
+          ? `Version ${snapshot.update.version} update failed`
+      : snapshot.update
+        ? `Version ${snapshot.update.version} available`
+        : checkingUpdates || snapshot.updateCheck.state === 'checking'
+          ? 'Checking GitHub…'
+          : snapshot.updateCheck.state === 'up-to-date'
+            ? 'Up to date'
+            : snapshot.updateCheck.state === 'error'
+              ? 'Update check failed'
+              : 'Not checked yet';
 
   return <>
     <SurfaceHeader eyebrow="Settings" icon="settings" title="Codex defaults" body="Choose the native model and reasoning effort the Router uses for your active account." />
@@ -421,15 +454,25 @@ function SettingsSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot
       </SettingRow>
       <div className="settings-save"><PrimaryButton disabled={!active || saving || (model === (active?.preferredModel ?? '') && effort === (active?.preferredEffort ?? 'medium'))} onClick={() => void savePreferences()}>{saving ? 'Saving…' : 'Save model defaults'}</PrimaryButton></div>
       <div className="settings-section-label">Desktop</div>
+      <SettingRow title="App updates" description={snapshot.updateCheck.supported
+        ? `Checks GitHub automatically. ${snapshot.updateCheck.checkedAt ? `Last checked ${new Date(snapshot.updateCheck.checkedAt).toLocaleString()}. ` : ''}${snapshot.updateCheck.error || 'You choose when to install an available update.'}`
+        : 'Automatic update checks require an installed app with update support.'}>
+        <div className="update-setting-actions">
+          <span className="value-text" role="status">{updateStatus}</span>
+          <SecondaryButton disabled={!snapshot.updateCheck.supported || checkingUpdates || snapshot.updateCheck.state === 'checking'} icon="refresh" onClick={() => void checkUpdates()}>{checkingUpdates || snapshot.updateCheck.state === 'checking' ? 'Checking…' : 'Check now'}</SecondaryButton>
+          {snapshot.update && (snapshot.update.state === 'available' || snapshot.update.state === 'ready' || snapshot.update.state === 'error')
+            ? <PrimaryButton disabled={applyingUpdate} icon="refresh" onClick={() => void applyAvailableUpdate()}>{applyingUpdate ? 'Updating…' : 'Update & restart'}</PrimaryButton>
+            : null}
+        </div>
+      </SettingRow>
       <SettingRow title="Launch at login" description={snapshot.autostart.supported ? 'Start CodexRouter hidden when you sign in to macOS.' : 'Available in the packaged desktop app.'}>
         <Toggle checked={snapshot.autostart.enabled} disabled={!snapshot.autostart.supported} onChange={async checked => { try { await api!.setAutostart(checked); await onRefresh(); } catch (cause) { setError(messageOf(cause)); } }} />
       </SettingRow>
       <SettingRow title="Model shown in Codex" description="All account and model routing happens behind this one managed row."><code>{snapshot.gateway.displayName}</code></SettingRow>
       <SettingRow title="Router endpoint" description="Loopback only. It is not exposed to the network."><code>127.0.0.1:{snapshot.runtime.port}</code></SettingRow>
-      <SettingRow title="Codex" description={snapshot.codex.available ? 'Detected on this Mac.' : 'Install the Codex CLI before adding accounts.'}><span className="value-text">{snapshot.codex.version || 'Not found'}</span></SettingRow>
+      <SettingRow title="Codex" description={snapshot.codex.available ? 'Detected on this computer.' : 'Install the Codex CLI before adding accounts.'}><span className="value-text">{snapshot.codex.version || 'Not found'}</span></SettingRow>
       <SettingRow title="Local data" description="Account metadata, isolated CODEX_HOME profiles and the generated gateway catalog."><SecondaryButton icon="folder" onClick={() => void run(() => api!.revealData(), setError)}>Reveal</SecondaryButton></SettingRow>
     </div>
-    <div className="credits-panel"><Icon name="shield" /><div><strong>Open-source attribution</strong><p>The desktop UI/UX and launcher patterns are adapted from <code>miuuyy/codex-chatgpt-web</code> under the MIT License. The original notice remains in <code>LICENSES/</code>.</p></div><SecondaryButton icon="external" onClick={() => void api!.openExternal('https://github.com/miuuyy/codex-chatgpt-web')}>Upstream</SecondaryButton></div>
   </>;
 }
 

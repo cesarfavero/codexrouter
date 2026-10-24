@@ -1,4 +1,3 @@
-// Architecture adapted from miuuyy/codex-chatgpt-web (MIT). See THIRD_PARTY_NOTICES.md.
 import { fetchNativeCatalog, fetchNativeCatalogAsync } from './auth.js';
 import { catalogPath } from './paths.js';
 import { writeJsonAtomic } from './fs-util.js';

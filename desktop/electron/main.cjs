@@ -33,6 +33,8 @@ let updateInfo = null;
 let updateStatus = null;
 let updateProgress = 0;
 let updateApplyPromise = null;
+let updateCheckPromise = null;
+let updateCheck = { state: 'idle', checkedAt: null, error: null };
 let autoUpdateCapability = null;
 const logs = loadLogs();
 
@@ -277,9 +279,28 @@ function sendEvent(payload) {
   }
 }
 
-async function checkForUpdates() {
-  if (!canUseAutoUpdater()) return;
-  try { await autoUpdater.checkForUpdates(); } catch (error) { record('warning', `Update check failed: ${error.message}`); }
+async function checkForUpdates({ manual = false } = {}) {
+  if (!canUseAutoUpdater()) {
+    if (manual) throw new Error(updateUnavailableMessage());
+    return;
+  }
+  if (!updateCheckPromise) {
+    updateCheck = { ...updateCheck, state: 'checking', error: null };
+    sendEvent({ type: 'snapshot-invalidated' });
+    updateCheckPromise = (async () => {
+      try {
+        await autoUpdater.checkForUpdates();
+        updateCheck = { state: updateInfo ? 'available' : 'up-to-date', checkedAt: new Date().toISOString(), error: null };
+      } catch (error) {
+        updateCheck = { state: 'error', checkedAt: new Date().toISOString(), error: error.message };
+        record('warning', `Update check failed: ${error.message}`);
+        throw error;
+      } finally {
+        sendEvent({ type: 'snapshot-invalidated' });
+      }
+    })().finally(() => { updateCheckPromise = null; });
+  }
+  return manual ? updateCheckPromise : updateCheckPromise.catch(() => {});
 }
 
 function canUseAutoUpdater() {
@@ -381,6 +402,7 @@ async function snapshot() {
       state: updateStatus,
       progress: updateProgress,
     } : null,
+    updateCheck: { ...updateCheck, supported: canUseAutoUpdater() },
     accounts,
     catalogRefresh: catalogRefreshState,
     defaultAccountId: registry.defaultAccountId,
@@ -601,6 +623,10 @@ async function authenticateAccount(account, operationName, { reuseMainSession = 
 
 function registerIpc() {
   ipcMain.handle('codexrouter:snapshot', () => snapshot());
+  ipcMain.handle('codexrouter:update:check', async () => {
+    await checkForUpdates({ manual: true });
+    return snapshot();
+  });
   ipcMain.handle('codexrouter:update:download', async () => {
     if (!canUseAutoUpdater()) throw new Error(updateUnavailableMessage());
     if (!updateInfo) throw new Error('No update is available.');
@@ -964,7 +990,7 @@ if (!lock) {
     const hidden = process.argv.includes('--hidden');
     createWindow({ hidden });
     void checkForUpdates();
-    updateTimer = setInterval(() => void checkForUpdates(), 6 * 60 * 60 * 1000);
+    updateTimer = setInterval(() => void checkForUpdates(), 30 * 60 * 1000);
     await restoreRuntimeIfInstalled();
     void refreshCatalogInBackground();
     catalogRefreshTimer = setInterval(() => void refreshCatalogInBackground(), 60 * 60 * 1000);
