@@ -71,9 +71,12 @@ export function prepareAccountCodexHome(codexHome) {
     writeTextAtomic(configPath, 'cli_auth_credentials_store = "file"\n');
   } else {
     const text = fs.readFileSync(configPath, 'utf8');
-    if (!/^\s*cli_auth_credentials_store\s*=/m.test(text)) {
-      writeTextAtomic(configPath, `cli_auth_credentials_store = "file"\n${text}`);
-    }
+    const credentialSetting = /^\s*cli_auth_credentials_store\s*=.*$/m;
+    const configured = credentialSetting.test(text);
+    const next = configured
+      ? text.replace(credentialSetting, 'cli_auth_credentials_store = "file"')
+      : `cli_auth_credentials_store = "file"\n${text}`;
+    if (next !== text) writeTextAtomic(configPath, next);
   }
 }
 

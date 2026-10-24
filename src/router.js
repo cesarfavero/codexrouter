@@ -3,7 +3,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { brotliDecompressSync, gunzipSync, inflateSync, zstdDecompressSync } from 'node:zlib';
-import { freshAuth } from './auth.js';
+import { freshAuth, inspectAuth } from './auth.js';
 import { GATEWAY_SLUG, isGatewaySlug, parseAccountModelSlug } from './catalog.js';
 import { allAccounts, defaultAccount, setDefaultAccount } from './store.js';
 import { catalogPath, mainCodexHome } from './paths.js';
@@ -107,6 +107,7 @@ export function startRouter({
           if (qualified) {
             account = allAccounts().find(candidate => candidate.id === qualified.accountId);
             if (!account || account.enabled === false) throw httpError(400, `CodexRouter account is disabled: ${requestedModel}`);
+            if (!hasAccountAuth(account)) throw disconnectedAccountError(account);
             let usage = await readUsageSafely(usageReader, account);
             if (usageNeedsFreshRead(usage)) usage = await readUsageSafely(usageReader, account, { force: true });
             if (!usageIsHealthy(usage)) throw cooldownError(account, usage);
@@ -306,10 +307,14 @@ async function selectGatewayAccount(active, usageReader, { force = false, exclud
 
 async function listHealthyGatewayAccounts(active, usageReader, { force = false, exclude = new Set() } = {}) {
   const accounts = allAccounts();
-  const candidates = [active, ...accounts.filter(account => account.id !== active.id)]
+  const configured = [active, ...accounts.filter(account => account.id !== active.id)]
     .filter(account => account?.enabled !== false)
     .filter(account => typeof account?.preferredModel === 'string' && account.preferredModel.length > 0)
     .filter((account, index, list) => !exclude.has(account.id) && list.findIndex(item => item.id === account.id) === index);
+  const candidates = configured.filter(hasAccountAuth);
+  if (!candidates.length && configured.length) {
+    throw httpError(503, 'No enabled CodexRouter account is signed in. Re-authenticate an account in CodexRouter > Accounts.');
+  }
   const healthy = [];
   let refreshAll = force;
   for (const account of candidates) {
@@ -335,6 +340,15 @@ async function listHealthyGatewayAccounts(active, usageReader, { force = false, 
     return healthy;
   }
   throw cooldownError(active, await readUsageSafely(usageReader, active, { force }));
+}
+
+function hasAccountAuth(account) {
+  try { return Boolean(inspectAuth(account.codexHome).accessToken); }
+  catch { return false; }
+}
+
+function disconnectedAccountError(account) {
+  return httpError(503, `CodexRouter account “${account.label}” is not signed in. Re-authenticate it in CodexRouter > Accounts.`);
 }
 
 function chooseGatewayAccount(healthy, active) {
