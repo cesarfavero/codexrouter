@@ -33,12 +33,35 @@ export function codexBinary() {
   return process.platform === 'win32' ? 'codex.cmd' : 'codex';
 }
 
+export async function probeCodexCli() {
+  const binary = codexBinary();
+  try {
+    const { stdout } = await execFileAsync(codexCommand(binary), ['--version'], {
+      ...codexCommandOptions(binary),
+      timeout: 10_000,
+      maxBuffer: 64 * 1024,
+      windowsHide: true,
+    });
+    const version = /\b(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)\b/.exec(stdout)?.[1];
+    return { available: Boolean(version), version: version ?? null };
+  } catch {
+    return { available: false, version: null };
+  }
+}
+
 function codexCommandOptions(binary) {
   // npm installs Codex as a .cmd shim on Windows. Node needs cmd.exe to launch it.
   // All arguments at these call sites are fixed Codex subcommands.
   return process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(binary)
     ? { shell: true }
     : {};
+}
+
+function codexCommand(binary) {
+  // With shell: true, Windows requires a quoted script path when it has spaces.
+  return process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(binary)
+    ? `"${binary}"`
+    : binary;
 }
 
 export function prepareAccountCodexHome(codexHome) {
@@ -76,7 +99,7 @@ export function reuseMainCodexSession(codexHome) {
 function runCodex(codexHome, args, options = {}) {
   prepareAccountCodexHome(codexHome);
   const binary = codexBinary();
-  const result = spawnSync(binary, args, {
+  const result = spawnSync(codexCommand(binary), args, {
     ...codexCommandOptions(binary),
     env: { ...process.env, CODEX_HOME: codexHome },
     stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
@@ -120,7 +143,7 @@ export function loginInteractive(codexHome, {
 
   return new Promise((resolve, reject) => {
     const binary = codexBinary();
-    const child = spawn(binary, ['login'], {
+    const child = spawn(codexCommand(binary), ['login'], {
       ...codexCommandOptions(binary),
       env: { ...process.env, CODEX_HOME: codexHome },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -213,7 +236,7 @@ export function fetchNativeCatalog(codexHome) {
 export async function fetchNativeCatalogAsync(codexHome) {
   prepareAccountCodexHome(codexHome);
   const binary = codexBinary();
-  const { stdout } = await execFileAsync(binary, ['debug', 'models'], {
+  const { stdout } = await execFileAsync(codexCommand(binary), ['debug', 'models'], {
     ...codexCommandOptions(binary),
     env: { ...process.env, CODEX_HOME: codexHome },
     timeout: 120_000,
