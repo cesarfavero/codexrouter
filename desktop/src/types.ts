@@ -63,6 +63,7 @@ export type Snapshot = {
   platform: string;
   packaged: boolean;
   update: { version: string; url: string; state: 'available' | 'downloading' | 'ready' | 'installing' | 'error'; progress: number } | null;
+  updateCheck: { state: 'idle' | 'checking' | 'up-to-date' | 'available' | 'error'; checkedAt: string | null; error: string | null; supported: boolean };
   accounts: AccountSummary[];
   catalogRefresh: { status: 'idle' | 'refreshing' | 'ready' | 'error'; lastSuccessAt: string | null; error: string | null };
   defaultAccountId: string | null;
@@ -122,6 +123,7 @@ export type CodexRouterDesktopApi = {
   setAutostart(enabled: boolean): Promise<{ supported: boolean; enabled: boolean }>;
   openExternal(url: string): Promise<void>;
   revealData(): Promise<{ ok: boolean }>;
+  checkUpdate(): Promise<Snapshot>;
   downloadUpdate(): Promise<{ ok: boolean }>;
   installUpdate(): Promise<{ ok: boolean }>;
   applyUpdate(): Promise<{ ok: boolean }>;

@@ -1,4 +1,3 @@
-// Architecture adapted from miuuyy/codex-chatgpt-web (MIT). See THIRD_PARTY_NOTICES.md.
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { Readable } from 'node:stream';

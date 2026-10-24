@@ -268,20 +268,6 @@ npm run desktop:package
 
 Release artifacts include a DMG, ZIP and SHA-256 checksums. Builds requiring Apple Developer signing and notarization must provide the corresponding credentials in GitHub Actions; credentials are never stored in this repository.
 
-## Open-source ancestry
-
-CodexRouter intentionally builds on [`miuuyy/codex-chatgpt-web`](https://github.com/miuuyy/codex-chatgpt-web), MIT licensed.
-
-We reuse/adapt its architectural and UI/UX approach, including the native Codex catalog/bridge concept and desktop launcher patterns. The original MIT license is preserved at:
-
-```text
-LICENSES/codex-chatgpt-web-MIT.txt
-```
-
-Detailed attribution is in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). We do not claim authorship of the upstream work.
-
-CodexRouter deliberately does **not** include the upstream ChatGPT Web browser worker, DOM automation, Temporary Chat transport, Playwright login, cookie import or MCP browser harness.
-
 ## License and branding
 
 CodexRouter source code is MIT licensed. You may fork and modify the code if you preserve the license, copyright and third-party notices. Modified builds must use a distinct name and logo and may not present themselves as the official CodexRouter app or imply endorsement. See [`TRADEMARKS.md`](TRADEMARKS.md) for the branding policy.

@@ -28,15 +28,12 @@ CodexRouter presents one managed `Router` model in the native Codex picker. The 
 
 Prefer the official installed Codex CLI for login, logout, status and refresh behavior. Each account must use an isolated `CODEX_HOME`. The router may read the resulting account-scoped auth file only as needed to forward authenticated native Codex requests and read account usage state.
 
-## Upstream attribution
-
-`miuuyy/codex-chatgpt-web` is an explicit architectural and code/UI reference under the MIT License. Preserve `THIRD_PARTY_NOTICES.md` and `LICENSES/codex-chatgpt-web-MIT.txt`. Mark directly copied or closely adapted substantial code when introduced.
-
 ## Changes
 
 For repository work, create/link an Issue, use a branch, make focused commits, open a PR, run tests/checks, review, and merge completed work to `main` unless an issue explicitly requires otherwise. After each validated code or product update, increment the version when applicable, build the distributable artifacts, publish the corresponding GitHub release, and install the freshly built macOS app over the current `/Applications/CodexRouter.app` installation when a macOS build is available.
 
 Windows auto-updates require each GitHub release to include the NSIS `.exe`, its `.blockmap`, and the matching `latest.yml` from the same build. Keep the update action user-initiated and verify those assets after publishing.
+The packaged Windows app checks GitHub Releases at startup and periodically, exposes a manual check in Settings, and offers an explicit Update & restart action. Surface check errors and the last check result in the UI.
 
 On Windows, Codex CLI may be an npm `.cmd` shim in a path with spaces. Use the shared launcher for model refresh and version detection, and run the shim test on a Windows CI runner. Surface catalog refresh errors in the desktop UI so stale models are distinguishable from unavailable account models.
 
