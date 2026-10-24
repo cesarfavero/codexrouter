@@ -5,7 +5,7 @@ import { brotliDecompressSync, gunzipSync, inflateSync, zstdDecompressSync } fro
 import { freshAuth, inspectAuth } from './auth.js';
 import { GATEWAY_SLUG, isGatewaySlug, parseAccountModelSlug } from './catalog.js';
 import { allAccounts, defaultAccount, setDefaultAccount } from './store.js';
-import { catalogPath, mainCodexHome } from './paths.js';
+import { catalogPath } from './paths.js';
 import { readJson } from './fs-util.js';
 import { getAccountUsage } from './usage.js';
 import { createJevAdvisor, summarizeJevDecision } from './jev.js';
@@ -67,7 +67,7 @@ export function startRouter({
 
       const endpoint = routeEndpoint(req.method, req.url);
       if (!endpoint) {
-        const upstream = await forwardOfficial({ req, body: await readBody(req), officialBase: officialUpstreamBase, forceRefresh: false, fetchImpl });
+        const upstream = await forwardOfficial({ req, body: await readBody(req), officialBase: officialUpstreamBase, fetchImpl });
         await writeResponse(res, upstream);
         await emitRequest(onRequest, { requestId, account: null, endpoint: req.url?.split('?')[0] || null, model: null, status: upstream.status, transport: 'official-http', method: req.method || null, durationMs: Date.now() - startedAt, attempts: [] });
         return;
@@ -442,24 +442,15 @@ async function forward({ req, body, account, endpoint, upstreamBase, forceRefres
   return fetchImpl(upstream, { method: 'POST', headers, body });
 }
 
-async function forwardOfficial({ req, body, officialBase, forceRefresh, fetchImpl }) {
-  const auth = await officialAuth({ force: forceRefresh, incomingAuthorization: req.headers.authorization });
+async function forwardOfficial({ req, body, officialBase, fetchImpl }) {
   const headers = new Headers();
   for (const [name, value] of Object.entries(req.headers)) {
     if (value == null || HOP_BY_HOP.has(name.toLowerCase())) continue;
-    if (name.toLowerCase() === 'authorization' || name.toLowerCase() === 'chatgpt-account-id') continue;
     if (Array.isArray(value)) value.forEach(item => headers.append(name, item));
     else headers.set(name, String(value));
   }
-  if (auth?.accessToken) headers.set('authorization', `Bearer ${auth.accessToken}`);
-  if (auth?.accountId) headers.set('chatgpt-account-id', auth.accountId);
   const target = officialTarget(officialBase, req.url || '/');
   return fetchImpl(target, { method: req.method, headers, body: body?.length ? body : undefined });
-}
-
-async function officialAuth({ force = false, incomingAuthorization }) {
-  try { return freshAuth(mainCodexHome(), { force }); }
-  catch { return incomingAuthorization ? { accessToken: incomingAuthorization.replace(/^Bearer\s+/i, '') } : null; }
 }
 
 function stripVersionPrefix(url) {

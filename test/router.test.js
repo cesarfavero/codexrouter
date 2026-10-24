@@ -92,9 +92,14 @@ test('responses WebSocket upgrade is rejected locally so the request can use acc
 
 test('router passes unknown Codex routes through to the official upstream', async () => {
   const state = await fixture();
-  let seen = null;
+  const seen = [];
   const upstream = http.createServer((req, res) => {
-    seen = { url: req.url, method: req.method };
+    seen.push({
+      url: req.url,
+      method: req.method,
+      authorization: req.headers.authorization,
+      accountId: req.headers['chatgpt-account-id'],
+    });
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
   });
@@ -106,9 +111,23 @@ test('router passes unknown Codex routes through to the official upstream', asyn
   });
   await once(router, 'listening');
   try {
-    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/remote/status?check=1`, { headers: { authorization: 'Bearer test' } });
+    const response = await fetch(`http://127.0.0.1:${router.address().port}/v1/remote/status?check=1`, {
+      headers: { authorization: 'Bearer caller-only', 'chatgpt-account-id': 'caller-account' },
+    });
     assert.equal(response.status, 200);
-    assert.deepEqual(seen, { url: '/backend-api/codex/remote/status?check=1', method: 'GET' });
+    const unauthenticated = await fetch(`http://127.0.0.1:${router.address().port}/v1/remote/status?check=2`);
+    assert.equal(unauthenticated.status, 200);
+    assert.deepEqual(seen, [{
+      url: '/backend-api/codex/remote/status?check=1',
+      method: 'GET',
+      authorization: 'Bearer caller-only',
+      accountId: 'caller-account',
+    }, {
+      url: '/backend-api/codex/remote/status?check=2',
+      method: 'GET',
+      authorization: undefined,
+      accountId: undefined,
+    }]);
   } finally {
     await new Promise(resolve => router.close(resolve));
     await new Promise(resolve => upstream.close(resolve));
