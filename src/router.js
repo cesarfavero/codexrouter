@@ -185,21 +185,25 @@ export function startRouter({
       try { requestModel = JSON.parse(body.toString('utf8')).model ?? null; } catch {}
       routedAccount = account;
       routedModel = requestModel;
-      const usage = await writeResponse(res, upstream);
       const jev = summarizeJevDecision(jevDecision, jevRouting, jevAccountRouting);
       await emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http', durationMs: Date.now() - startedAt, attempts, usage: null, jev });
+      const usage = await writeResponse(res, upstream);
       if (usage) void emitRequest(onRequest, { requestId, account, endpoint, model: requestModel, status: upstream.status, transport: 'http-usage', durationMs: Date.now() - startedAt, attempts, usage, usageOnly: true, jev });
     } catch (error) {
       const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
       await emitRequest(onRequest, { requestId, account: routedAccount, endpoint: req.url?.split('?')[0] || null, model: routedModel, status, transport: 'http', durationMs: Date.now() - startedAt, attempts, error: safeErrorSummary(error), jev: summarizeJevDecision(jevDecision, jevRouting, jevAccountRouting) });
-      res.writeHead(status, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({
-        error: {
-          message: error?.message || String(error),
-          type: error?.type || (status === 429 ? 'usage_limit_reached' : 'codexrouter_error'),
-          cooldown_until: error?.cooldownUntil ?? null,
-        },
-      }));
+      if (res.headersSent) {
+        res.destroy();
+      } else {
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          error: {
+            message: error?.message || String(error),
+            type: error?.type || (status === 429 ? 'usage_limit_reached' : 'codexrouter_error'),
+            cooldown_until: error?.cooldownUntil ?? null,
+          },
+        }));
+      }
     }
   });
   server.on('upgrade', (req, socket, head) => {

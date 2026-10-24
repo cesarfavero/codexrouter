@@ -249,6 +249,10 @@ function record(level, message, details = null) {
 }
 
 async function recordRouterRequest(event) {
+  if (event.transport === 'websocket-negotiation' && event.status === 426) {
+    record('info', 'Codex WebSocket is unavailable here; waiting to see whether Codex retries the model request over HTTP.', event);
+    return;
+  }
   if (event.usageOnly) {
     if (event.account?.id) {
       const { usage } = await core();
