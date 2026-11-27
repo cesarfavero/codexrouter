@@ -112,9 +112,22 @@ function assertInstalledValuesUnchanged(lines, journal) {
   }
 }
 
+function sameConfigPath(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const canonical = value => {
+    const normalized = normalizePathLike(path.resolve(value));
+    return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+  };
+  return canonical(a) === canonical(b);
+}
+
 export function installIntegration({ port = 17842 } = {}) {
-  migrateGatewayDefaultModel();
   const configPath = mainCodexConfigPath();
+  const priorJournal = readJson(integrationJournalPath(), null);
+  if (priorJournal?.configPath && !sameConfigPath(priorJournal.configPath, configPath)) {
+    throw new Error('Router was installed for a different CODEX_HOME. Open Router with the original CODEX_HOME, uninstall the old integration, then install it for the profile Codex uses.');
+  }
+  migrateGatewayDefaultModel();
   ensureDir(path.dirname(configPath));
   let text = '';
   try { text = fs.readFileSync(configPath, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -204,6 +217,9 @@ export function migrateGatewayDefaultModel() {
 export function integrationStatus() {
   try {
     const journal = readJson(integrationJournalPath());
+    if (!sameConfigPath(journal?.configPath, mainCodexConfigPath())) {
+      return { installed: false, journal, activeModel: null, gatewayDefault: false };
+    }
     const text = fs.readFileSync(journal.configPath, 'utf8');
     const lines = text.replace(/\n$/, '').split(/\r?\n/);
     const keys = journalManagedKeys(journal);
