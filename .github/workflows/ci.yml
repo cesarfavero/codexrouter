@@ -43,6 +43,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Verify Windows Codex CLI shim
         run: node --test --test-name-pattern="Windows Codex .cmd shim" test/auth.test.js
+      - name: Verify Windows desktop launch with a real CLI shim
+        run: node --test test/codex-launch.test.js
       - name: Build Windows installer
         run: npm run desktop:package:win
       - name: Verify updater assets

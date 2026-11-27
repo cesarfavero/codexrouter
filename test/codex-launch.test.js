@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import launcher from '../desktop/electron/codex-launch.cjs';
 const { launchCodex }=launcher;
 
@@ -48,4 +51,28 @@ test('Windows launch quotes npm shim and uses a fixed subcommand',async()=>{
   assert.deepEqual(fixture.calls[0].args,['app']);
   assert.equal(fixture.calls[0].name,`"${bin}"`);
   assert.equal(fixture.calls[0].options.cwd,'C:\\A project');
+});
+
+
+test('Windows desktop launcher runs a real .cmd shim with spaces', { skip: process.platform !== 'win32' }, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'router-launch-'));
+  try {
+    const shimDir = path.join(root, 'cli with spaces');
+    const projectDir = path.join(root, 'project with spaces');
+    await mkdir(shimDir);
+    await mkdir(projectDir);
+    const bin = path.join(shimDir, 'codex.cmd');
+    await writeFile(bin, [
+      '@echo off',
+      'if not "%~1"=="app" exit /b 2',
+      'if not "%~2"=="" exit /b 3',
+      '>router-launch.ok echo ready',
+      'exit /b 0',
+      '',
+    ].join('\r\n'));
+    await launchCodex({ projectDir, codexBinary: () => bin });
+    assert.equal((await readFile(path.join(projectDir, 'router-launch.ok'), 'utf8')).trim(), 'ready');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
