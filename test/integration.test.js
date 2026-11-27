@@ -163,3 +163,19 @@ test('uninstall still fails closed if a managed value changed after install', ()
     assert.throws(() => uninstallIntegration(), /changed after CodexRouter install|changed after install/);
   });
 });
+
+
+test('an integration journal in another CODEX_HOME is not reported as installed and is preserved', () => {
+  withIntegrationFixture('model = "gpt-native"\n', ({ codexHome, routerHome }) => {
+    installIntegration();
+    const original = fs.readFileSync(path.join(routerHome, 'integration.json'), 'utf8');
+    const alternate = path.join(path.dirname(codexHome), 'alt');
+    fs.mkdirSync(alternate);
+    fs.writeFileSync(path.join(alternate,'config.toml'), 'model = "gpt-alt"\n');
+    process.env.CODEX_HOME=alternate;
+    assert.equal(integrationStatus().installed,false);
+    assert.throws(()=>installIntegration(),/different CODEX_HOME/);
+    assert.equal(fs.readFileSync(path.join(alternate,'config.toml'),'utf8'), 'model = "gpt-alt"\n');
+    assert.equal(fs.readFileSync(path.join(routerHome,'integration.json'),'utf8'),original);
+  });
+});

@@ -94,7 +94,7 @@ export function App() {
               <span>{activeAccount ? `${activeAccount.label} · ${activeAccount.preferredModel || 'sync model'}` : 'No active account'}</span>
             </div>
           </div>
-          <button className="sidebar-codex" onClick={() => void run(() => api.openCodex(), setError)} type="button">
+          <button className="sidebar-codex" onClick={() => { if (!snapshot.integration.installed || !snapshot.integration.catalogReady || !snapshot.runtime.running) { setSurface('setup'); return; } void run(() => api.openCodex(), setError); }} type="button">
             <Icon name="brain" />Open Codex<Icon name="external" />
           </button>
         </div>
@@ -320,9 +320,10 @@ function EmptyAccounts({ onAdd }: { onAdd: () => void }) {
 function SetupSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot; onRefresh: () => Promise<void>; setError: (message: string | null) => void }) {
   const connected = snapshot.accounts.filter(account => account.connected).length;
   const active = snapshot.accounts.find(account => account.isActive);
+  const ready = snapshot.integration.installed && snapshot.integration.catalogReady && snapshot.runtime.running;
   const steps = [
     { done: connected > 0, title: 'Connect accounts', body: `${connected} of ${snapshot.accounts.length} configured accounts are authenticated.` },
-    { done: Boolean(active?.preferredModel), title: 'Build gateway model', body: active?.preferredModel ? `CodexRouter currently resolves to ${active.preferredModel} on ${active.label}.` : 'Read the active account model catalog and create one CodexRouter entry.' },
+    { done: snapshot.integration.catalogReady, title: 'Build gateway model', body: active?.preferredModel ? `CodexRouter currently resolves to ${active.preferredModel} on ${active.label}.` : 'Read the active account model catalog and create one CodexRouter entry.' },
     { done: snapshot.integration.installed, title: 'Install Codex integration', body: 'Manage openai_base_url and model_catalog_json transactionally in the main Codex config.' },
     { done: snapshot.runtime.running, title: 'Run in the background', body: `Keep the gateway available on 127.0.0.1:${snapshot.runtime.port}.` },
   ];
@@ -343,13 +344,13 @@ function SetupSurface({ snapshot, onRefresh, setError }: { snapshot: Snapshot; o
         {snapshot.integration.installed ? <SecondaryButton icon="trash" onClick={() => void doAndRefresh(() => api!.uninstall(), onRefresh, setError)}>Uninstall integration</SecondaryButton> : null}
       </div>
 
-      <div className={`ready-panel ${snapshot.integration.installed && snapshot.runtime.running ? 'is-ready' : ''}`}>
-        <div className="ready-icon"><Icon name={snapshot.integration.installed && snapshot.runtime.running ? 'check' : 'setup'} /></div>
+      <div className={`ready-panel ${ready ? 'is-ready' : ''}`}>
+        <div className="ready-icon"><Icon name={ready ? 'check' : 'setup'} /></div>
         <div>
-          <strong>{snapshot.integration.installed && snapshot.runtime.running ? 'Ready for Codex' : 'Finish setup to expose the gateway'}</strong>
-          <p>{snapshot.integration.installed && snapshot.runtime.running ? `Open Codex and choose “${snapshot.gateway.displayName}”. Account and native model stay managed here.` : 'Your account profiles remain isolated before the global integration is installed.'}</p>
+          <strong>{ready ? 'Ready for Codex' : 'Finish setup to expose the gateway'}</strong>
+          <p>{ready ? `Fully quit Codex if it is already running. After reopening, choose “${snapshot.gateway.displayName}” in a new local thread. Account and native model stay managed here.` : !snapshot.integration.installed ? 'Opening Codex alone does not install the integration. Use Install & start first, then fully quit and reopen Codex.' : !snapshot.integration.catalogReady ? 'The Router model is missing from the local catalog. Use Refresh gateway, then restart Codex.' : 'Start the gateway before opening Codex.'}</p>
         </div>
-        <PrimaryButton icon="brain" disabled={!snapshot.integration.installed || !snapshot.runtime.running} onClick={() => void run(() => api!.openCodex(), setError)}>Open Codex</PrimaryButton>
+        <PrimaryButton icon="brain" disabled={!ready} onClick={() => void run(() => api!.openCodex(), setError)}>Open Codex</PrimaryButton>
       </div>
     </>
   );

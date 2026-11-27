@@ -7,6 +7,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const { once } = require('node:events');
 const { pathToFileURL } = require('node:url');
 const { getAutostart, setAutostart } = require('./autostart.cjs');
+const { launchCodex } = require('./codex-launch.cjs');
 
 const DEFAULT_PORT = Number(process.env.CODEXROUTER_PORT || 17842);
 const VALID_EFFORTS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh']);
@@ -354,6 +355,13 @@ async function withOperation(name, work) {
   }
 }
 
+function hasVisibleRouterCatalog(catalog, paths) {
+  try {
+    return catalog.modelsFromCatalog(JSON.parse(fs.readFileSync(paths.catalogPath(), 'utf8')))
+      .some(model => model?.slug === catalog.GATEWAY_SLUG && model.visibility === 'list');
+  } catch { return false; }
+}
+
 async function snapshot() {
   const { store, auth, integration, paths, usage, catalog, jev } = await core();
   const registry = store.loadRegistry();
@@ -412,6 +420,7 @@ async function snapshot() {
     defaultAccountId: registry.defaultAccountId,
     integration: {
       installed: installed.installed,
+      catalogReady: hasVisibleRouterCatalog(catalog, paths),
       port: installed.journal?.port ?? DEFAULT_PORT,
       activeModel: installed.activeModel ?? null,
       gatewayDefault: installed.gatewayDefault === true,
@@ -585,19 +594,6 @@ function validateLabel(value) {
   const label = String(value || '').trim();
   if (label.length < 1 || label.length > 80) throw new Error('Account name must be between 1 and 80 characters.');
   return label;
-}
-
-function launchCodex(auth) {
-  const configuredProject = String(process.env.CODEXROUTER_PROJECT_DIR || '').trim();
-  if (process.platform === 'darwin' && !configuredProject) {
-    const child = spawn('/usr/bin/open', ['-a', 'Codex'], { detached: true, stdio: 'ignore' });
-    child.unref();
-    return;
-  }
-  const options = { detached: true, stdio: 'ignore', env: process.env };
-  if (configuredProject) options.cwd = configuredProject;
-  const child = spawn(auth.codexBinary(), ['app', ...(configuredProject ? [configuredProject] : [])], options);
-  child.unref();
 }
 
 async function authenticateAccount(account, operationName, { reuseMainSession = false } = {}) {
@@ -775,12 +771,16 @@ function registerIpc() {
 
   ipcMain.handle('codexrouter:runtime:stop', () => withOperation('Stop router', stopRuntime));
 
-  ipcMain.handle('codexrouter:open-codex', async () => {
-    const { auth } = await core();
-    launchCodex(auth);
-    record('info', 'Requested Codex Desktop launch.');
+  ipcMain.handle('codexrouter:open-codex', () => withOperation('Open Codex', async () => {
+    const { auth, catalog, integration, paths } = await core();
+    if (!integration.integrationStatus().installed || !routerServer?.listening) {
+      throw new Error('Open Setup and choose Install & start or Start gateway before opening Codex.');
+    }
+    if (!hasVisibleRouterCatalog(catalog, paths)) throw new Error('The Router model is missing from the catalog. Open Setup and choose Refresh gateway.');
+    await launchCodex({ projectDir: String(process.env.CODEXROUTER_PROJECT_DIR || '').trim(), codexBinary: auth.codexBinary });
+    record('info', 'Codex Desktop launch accepted. Fully quit and reopen Codex if it was already running.');
     return { ok: true };
-  });
+  }));
 
   ipcMain.handle('codexrouter:jev:settings', (_event, settings) => withOperation('Save Jev settings', () => applyJevSettings(settings)));
 
